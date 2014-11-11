@@ -1,0 +1,268 @@
+Grammar
+
+    0 $accept: paper $end
+
+    1 paper: title authors year venue id refs_list abstract break
+
+    2 title: TITLE_T
+
+    3 authors: AUTHOR_T ',' authors
+    4        | AUTHOR_T
+
+    5 year: YEAR_T
+
+    6 venue: VENUE_T
+
+    7 id: ID_T
+
+    8 refs_list: refs_list '\n' REF_T
+    9          | REF_T
+   10          | EMPTY_REF
+
+   11 abstract: ABSTRACT_T
+   12         | EMPTY_ABSTRACT
+
+   13 break: BREAK_T
+
+
+Terminals, with rules where they appear
+
+$end (0) 0
+'\n' (10) 8
+',' (44) 3
+error (256)
+TITLE_T (258) 2
+AUTHOR_T (259) 3 4
+YEAR_T (260) 5
+VENUE_T (261) 6
+ID_T (262) 7
+REF_T (263) 8 9
+ABSTRACT_T (264) 11
+BREAK_T (265) 13
+EMPTY_REF (266) 10
+EMPTY_ABSTRACT (267) 12
+
+
+Nonterminals, with rules where they appear
+
+$accept (15)
+    on left: 0
+paper (16)
+    on left: 1, on right: 0
+title (17)
+    on left: 2, on right: 1
+authors (18)
+    on left: 3 4, on right: 1 3
+year (19)
+    on left: 5, on right: 1
+venue (20)
+    on left: 6, on right: 1
+id (21)
+    on left: 7, on right: 1
+refs_list (22)
+    on left: 8 9 10, on right: 1 8
+abstract (23)
+    on left: 11 12, on right: 1
+break (24)
+    on left: 13, on right: 1
+
+
+State 0
+
+    0 $accept: . paper $end
+
+    TITLE_T  shift, and go to state 1
+
+    paper  go to state 2
+    title  go to state 3
+
+
+State 1
+
+    2 title: TITLE_T .
+
+    $default  reduce using rule 2 (title)
+
+
+State 2
+
+    0 $accept: paper . $end
+
+    $end  shift, and go to state 4
+
+
+State 3
+
+    1 paper: title . authors year venue id refs_list abstract break
+
+    AUTHOR_T  shift, and go to state 5
+
+    authors  go to state 6
+
+
+State 4
+
+    0 $accept: paper $end .
+
+    $default  accept
+
+
+State 5
+
+    3 authors: AUTHOR_T . ',' authors
+    4        | AUTHOR_T .
+
+    ','  shift, and go to state 7
+
+    $default  reduce using rule 4 (authors)
+
+
+State 6
+
+    1 paper: title authors . year venue id refs_list abstract break
+
+    YEAR_T  shift, and go to state 8
+
+    year  go to state 9
+
+
+State 7
+
+    3 authors: AUTHOR_T ',' . authors
+
+    AUTHOR_T  shift, and go to state 5
+
+    authors  go to state 10
+
+
+State 8
+
+    5 year: YEAR_T .
+
+    $default  reduce using rule 5 (year)
+
+
+State 9
+
+    1 paper: title authors year . venue id refs_list abstract break
+
+    VENUE_T  shift, and go to state 11
+
+    venue  go to state 12
+
+
+State 10
+
+    3 authors: AUTHOR_T ',' authors .
+
+    $default  reduce using rule 3 (authors)
+
+
+State 11
+
+    6 venue: VENUE_T .
+
+    $default  reduce using rule 6 (venue)
+
+
+State 12
+
+    1 paper: title authors year venue . id refs_list abstract break
+
+    ID_T  shift, and go to state 13
+
+    id  go to state 14
+
+
+State 13
+
+    7 id: ID_T .
+
+    $default  reduce using rule 7 (id)
+
+
+State 14
+
+    1 paper: title authors year venue id . refs_list abstract break
+
+    REF_T      shift, and go to state 15
+    EMPTY_REF  shift, and go to state 16
+
+    refs_list  go to state 17
+
+
+State 15
+
+    9 refs_list: REF_T .
+
+    $default  reduce using rule 9 (refs_list)
+
+
+State 16
+
+   10 refs_list: EMPTY_REF .
+
+    $default  reduce using rule 10 (refs_list)
+
+
+State 17
+
+    1 paper: title authors year venue id refs_list . abstract break
+    8 refs_list: refs_list . '\n' REF_T
+
+    ABSTRACT_T      shift, and go to state 18
+    EMPTY_ABSTRACT  shift, and go to state 19
+    '\n'            shift, and go to state 20
+
+    abstract  go to state 21
+
+
+State 18
+
+   11 abstract: ABSTRACT_T .
+
+    $default  reduce using rule 11 (abstract)
+
+
+State 19
+
+   12 abstract: EMPTY_ABSTRACT .
+
+    $default  reduce using rule 12 (abstract)
+
+
+State 20
+
+    8 refs_list: refs_list '\n' . REF_T
+
+    REF_T  shift, and go to state 22
+
+
+State 21
+
+    1 paper: title authors year venue id refs_list abstract . break
+
+    BREAK_T  shift, and go to state 23
+
+    break  go to state 24
+
+
+State 22
+
+    8 refs_list: refs_list '\n' REF_T .
+
+    $default  reduce using rule 8 (refs_list)
+
+
+State 23
+
+   13 break: BREAK_T .
+
+    $default  reduce using rule 13 (break)
+
+
+State 24
+
+    1 paper: title authors year venue id refs_list abstract break .
+
+    $default  reduce using rule 1 (paper)
