@@ -11,7 +11,7 @@ import config
 
 
 # engine = sa.create_engine('sqlite:///dblp.sql', echo=False)
-connection_string = 'postgresql://%s:%s@%s/%s'.format(
+connection_string = 'postgresql://%s:%s@%s/%s' % (
     config.username,
     config.password,
     config.hostname,
