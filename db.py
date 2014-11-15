@@ -5,7 +5,11 @@ import argparse
 
 import sqlalchemy as sa
 from sqlalchemy import (
-    Table, Column, Integer, String, MetaData, ForeignKey, PrimaryKeyConstraint)
+    Table, Column,
+    Integer, String, TEXT,
+    ForeignKey, PrimaryKeyConstraint,
+    MetaData
+)
 
 import config
 
@@ -24,16 +28,22 @@ metadata = MetaData()
 papers = Table('papers', metadata,
     Column('id', Integer, primary_key=True),
     Column('title', String(255), nullable=False),
-    Column('abstract', String(255)),
+    Column('abstract', TEXT),
     Column('venue', String(255)),
     Column('year', Integer)
 )
 
+person = Table('person', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('name', String(255), unique=True)
+)
+
 authors = Table('authors', metadata,
-    Column('name', String(255)),
+    Column('person', Integer,
+           ForeignKey('person.id', onupdate='CASCADE', ondelete='CASCADE')),
     Column('paper', Integer,
            ForeignKey('papers.id', onupdate='CASCADE', ondelete='CASCADE')),
-    PrimaryKeyConstraint('name', 'paper', name='authors_pk')
+    PrimaryKeyConstraint('person', 'paper', name='authors_pk')
 )
 
 refs = Table('refs', metadata,
@@ -60,8 +70,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.verbose:
-        logging.basicConfig(level=logging.INFO)
-        engine.echo = True
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+        engine.echo=True
 
     logging.info('dropping all tables');
     metadata.drop_all(engine)
