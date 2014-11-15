@@ -36,6 +36,9 @@ def nextrecord(f):
     if title is None:
         return None
 
+    if len(title) > 255:
+        title = title[0:255]
+
     authors = fmatch(f, author_pattern)
     year = fmatch(f, year_pattern)
     venue = fmatch(f, venue_pattern)
@@ -70,7 +73,10 @@ def castrecord(record):
     year = record['year']
     record['year'] = int(year) if year else None
     author = record['authors']
-    record['authors'] = author.split(',') if ',' in author else [author]
+    if ',' in author:
+        record['authors'] = [a for a in author.split(',') if a]
+    else:
+        record['authors'] = [author]
     return record
 
 
@@ -187,10 +193,14 @@ if __name__ == "__main__":
         logging.basicConfig(
             level=logging.INFO,
             format='[%(asctime)s][%(levelname)s]: %(message)s')
-
-    if args.very_verbose:
-        logging.basicConfig(level=logging.DEBUG)
+    elif args.very_verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='[%(asctime)s][%(levelname)s]: %(message)s')
         db.engine.echo = True
+    else:
+        logging.basicConfig(level=logging.CRITICAL)
+        db.engine.echo = False
 
     # f = open(args.fpath)
     # r = nextrecord(f)
