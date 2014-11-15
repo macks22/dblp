@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import argparse
+import multiprocessing as mp
 
 import sqlalchemy as sa
 
@@ -20,8 +21,10 @@ abstract_pattern = re.compile("#!([^\r\n]*)")
 
 def match(line, pattern):
     m = pattern.match(line)
-    if m: return m.groups()[0].strip().decode('utf-8')
-    else: return None
+    if m:
+        return m.groups()[0].decode('utf-8').strip()
+    else:
+        return None
 
 
 def fmatch(f, pattern):
@@ -70,6 +73,8 @@ def nextrecord(f):
 def castrecord(record):
     record['id'] = int(record['id'])
     record['refs'] = [int(ref) for ref in record['refs']]
+    abstract = record['abstract']
+    record['abstract'] = abstract if abstract else None
     year = record['year']
     record['year'] = int(year) if year else None
     author = record['authors']
@@ -93,57 +98,61 @@ def iterrecords(fpath):
     return (castrecord(record) for record in iterdata(fpath))
 
 
+def insert(conn, ins):
+    """Attempt to run an insertion statement; return results, None if error."""
+    try:
+        ins_res = conn.execute(ins)
+    except sa.exc.IntegrityError as err:
+        # a paper already exists with this id
+        logging.error(str(err))
+        return None
+    except Exception as e:
+        logging.error('unexpected exception\n%s', str(e))
+        return None
+    else:
+        return ins_res
+
+
+def person_insert(conn, name):
+    sel = sa.sql.text("SELECT id FROM person WHERE LOWER(name)=LOWER(:n)")
+    res = conn.execute(sel, n=name)
+    p = res.first()
+
+    if p is not None:
+        return p['id']
+
+    ins = db.person.insert().values(name=name)
+    res = conn.execute(ins)
+    return res.inserted_primary_key[0]
+
+
 def process_record(record):
     """Update the database with the contents of the record."""
     logging.debug('processing record\n%s' % record);
     conn = db.engine.connect()
     paper_id = record['id']
+
     ins = db.papers.insert().\
             values(id=paper_id, title=record['title'],
                    venue=record['venue'], year=record['year'],
                    abstract=record['abstract'])
 
     # attempt to insert a new paper into the db
-    try:
-        ins_res = conn.execute(ins)
-    except sa.exc.IntegrityError as err:
-        # a paper already exists with this id
-        logging.error(str(err))
+    result = insert(conn, ins)
+    if result is None:
         # since ids come from data, we've already processed this record
         conn.close()
         return False
-    except Exception as e:
-        logging.error('unexpected exception\n%s', str(e))
-    else:
-        ins_res.close()
 
     # make new records for each author
     for author in record['authors']:
-        ins = db.authors.insert().\
-                values(paper=paper_id, name=author)
-        try:
-            ins_res = conn.execute(ins)
-        except sa.exc.IntegrityError as err:
-            # might happen if an author is listed twice for the same paper
-            logging.error(str(err))
-        except Exception as e:
-            logging.error('unexpected exception\n%s', str(e))
-        else:
-            ins_res.close()
+        person_id = person_insert(conn, author)
+        ins = db.authors.insert().values(paper=paper_id, person=person_id)
+        insert(conn, ins)  # may fail, but we don't really care
 
     for ref in record['refs']:
-        ins = db.refs.insert().\
-                values(paper=paper_id, ref=ref)
-
-        try:
-            ins_res = conn.execute(ins)
-        except sa.exc.IntegrityError as err:
-            # might happen if a paper lists the same reference multiple times
-            logging.error(str(err))
-        except Exception as e:
-            logging.error('unexpected exception\n%s', str(e))
-        else:
-            ins_res.close()
+        ins = db.refs.insert().values(paper=paper_id, ref=ref)
+        insert(conn, ins)
 
     conn.close()
     return True  # success
