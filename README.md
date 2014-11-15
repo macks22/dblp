@@ -43,3 +43,7 @@ distance of 1 or 2 could just as easily be a completely different name. One case
 which might be differentiated is when the edit is a deletion of a letter in a
 string of one or more of that same letter. For instance, "Acharya" vs.
 "Acharyya". Here it likely the second spelling simply has an extraneous y.
+
+# From PostgresSQL to Neo4j
+
+http://neo4j.com/developer/guide-importing-data-and-etl/
