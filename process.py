@@ -1,75 +1,50 @@
-import time
-import random
 import logging
 import argparse
 
-from threading import Thread
-from Queue import Queue
+from multiprocessing import Process, JoinableQueue
 import Queue as Q
 
 import dblp
 
 
-HOLDINGQ = Queue(10)
-READYQ = Queue()
 WAIT_TIME = 2
 
 
-def sequence():
-    """Return a new sequence which starts from 0 and increments 1 each call."""
-    counter = 0
+def read_records(fpath, holdingq):
+    logging.debug("starting to read records")
+    recordgen = dblp.iterdata(fpath)
+    for record in recordgen:
+        logging.debug("placing record in holding queue")
+        holdingq.put(record)
+    logging.debug("NO MORE RECORDS")
+
+
+def cast_records(holdingq, readyq):
+    logging.debug("starting to cast records")
     while True:
-        yield counter
-        counter += 1
+        try:
+            record = holdingq.get(True, WAIT_TIME)
+        except Q.Empty:
+            return 0
+
+        logging.debug("pulled record from holding queue")
+        casted = dblp.castrecord(record)
+        readyq.put(casted)
+        logging.debug("placing record in ready queue")
+        holdingq.task_done()
 
 
-class RecordProducer(Thread):
-    """Read records from the data file and add them to the queue."""
-    def __init__(self, fpath):
-        Thread.__init__(self)
-        self.fpath = fpath
+def process_records(readyq):
+    logging.debug("starting to process records")
+    while True:
+        try:
+            record = readyq.get(True, WAIT_TIME)
+        except Q.Empty:
+            return 0
 
-    def run(self):
-        global HOLDINGQ
-        recordgen = dblp.iterdata(self.fpath)
-        for record in recordgen:
-            logging.debug("placing record in holding queue")
-            HOLDINGQ.put(record)
-
-        logging.debug("NO MORE RECORDS")
-
-
-class RecordCaster(Thread):
-    """Pick up records from the queue and clean/cast values as appropriate."""
-    def run(self):
-        global HOLDINGQ
-        global READYQ
-        while True:
-            try:
-                record = HOLDINGQ.get(True, WAIT_TIME)
-            except Q.Empty:
-                return 0
-
-            logging.debug("pulled record from holding queue")
-            cleaned = dblp.castrecord(record)
-            READYQ.put(cleaned)
-            logging.debug("placing record in ready queue")
-            HOLDINGQ.task_done()
-
-
-class RecordConsumer(Thread):
-    """Pick up records from final queue and process into the DB."""
-    def run(self):
-        global READYQ
-        while True:
-            try:
-                record = READYQ.get(True, WAIT_TIME)
-            except Q.Empty:
-                return 0
-
-            logging.debug("pulled record from ready queue")
-            dblp.process_record(record)
-            READYQ.task_done()
+        logging.debug("pulled record from ready queue")
+        dblp.process_record(record)
+        readyq.task_done()
 
 
 def make_parser():
@@ -102,17 +77,23 @@ if __name__ == "__main__":
     else:
         logging.basicConfig(level=logging.CRITICAL)
 
-    producer = RecordProducer(args.fpath)
-    caster = RecordCaster()
-    consumer1 = RecordConsumer()
+    logging.info("creating work queues")
+    holdingq = JoinableQueue(10)
+    readyq = JoinableQueue()
 
-    threads = [producer, caster, consumer1]
+    producer = Process(target=read_records, args=(args.fpath, holdingq))
+    caster = Process(target=cast_records, args=(holdingq, readyq))
+    consumer = Process(target=process_records, args=(readyq,))
 
-    # start all threads
-    for thread in threads:
-        thread.start()
+    procs = [producer, caster, consumer]
 
-    # join all threads
-    for thread in threads:
-        thread.join()
+    # start all processes
+    logging.info(
+        "starting %d threads to process records in %s" % (
+            len(procs), args.fpath))
+    for proc in procs:
+        proc.start()
 
+    # join all processes
+    for proc in procs:
+        proc.join()
