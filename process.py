@@ -7,44 +7,33 @@ import Queue as Q
 import dblp
 
 
-WAIT_TIME = 2
+WAIT_TIME = 5
 
 
-def read_records(fpath, holdingq):
+def read_records(f, queue):
     logging.debug("starting to read records")
-    recordgen = dblp.iterdata(fpath)
-    for record in recordgen:
+    record = dblp.nextrecord(f)
+    while record is not None:
         logging.debug("placing record in holding queue")
-        holdingq.put(record)
+        queue.put(record)
+        record = dblp.nextrecord(f)
     logging.debug("NO MORE RECORDS")
 
 
-def cast_records(holdingq, readyq):
-    logging.debug("starting to cast records")
-    while True:
-        try:
-            record = holdingq.get(True, WAIT_TIME)
-        except Q.Empty:
-            return 0
-
-        logging.debug("pulled record from holding queue")
-        casted = dblp.castrecord(record)
-        readyq.put(casted)
-        logging.debug("placing record in ready queue")
-        holdingq.task_done()
-
-
-def process_records(readyq):
+def process_records(queue):
     logging.debug("starting to process records")
     while True:
         try:
-            record = readyq.get(True, WAIT_TIME)
+            record = queue.get(True, WAIT_TIME)
         except Q.Empty:
             return 0
 
         logging.debug("pulled record from ready queue")
-        dblp.process_record(record)
-        readyq.task_done()
+        try:
+            dblp.process_record(record)
+        except Exception as e:
+            print e
+        queue.task_done()
 
 
 def make_parser():
@@ -77,15 +66,19 @@ if __name__ == "__main__":
     else:
         logging.basicConfig(level=logging.CRITICAL)
 
-    logging.info("creating work queues")
-    holdingq = JoinableQueue(10)
-    readyq = JoinableQueue()
+    logging.info("setting up...")
+    queue = JoinableQueue(20)
+    f = open(args.fpath)
 
-    producer = Process(target=read_records, args=(args.fpath, holdingq))
-    caster = Process(target=cast_records, args=(holdingq, readyq))
-    consumer = Process(target=process_records, args=(readyq,))
+    producer1 = Process(target=read_records, args=(f, queue))
+    consumer1 = Process(target=process_records, args=(queue,))
+    consumer2 = Process(target=process_records, args=(queue,))
 
-    procs = [producer, caster, consumer]
+    procs = [
+        producer1,
+        consumer1,
+        consumer2
+    ]
 
     # start all processes
     logging.info(

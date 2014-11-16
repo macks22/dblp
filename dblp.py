@@ -9,6 +9,18 @@ import sqlalchemy as sa
 
 import db
 
+class Record(object):
+    __slots__ = ['id', 'title', 'authors', 'venue', 'refs', 'abstract', 'year']
+
+    def __init__(self, id, title, authors, venue, refs, abstract, year):
+        self.id = int(id)
+        self.title = title
+        self.venue = venue
+        self.refs = [int(ref) for ref in refs]
+        self.abstract = abstract if abstract else None
+        self.year = int(year) if year else None
+        self.authors = [a for a in authors.split(',') if a]
+
 
 title_pattern = re.compile("#\*([^\r\n]*)")
 author_pattern = re.compile("#@([^\r\n]*)")
@@ -59,15 +71,16 @@ def nextrecord(f):
 
     abstract = match(line, abstract_pattern)
 
-    return {
-        'title': title,
-        'authors': authors,
-        'year': year,
-        'venue': venue,
-        'id': paperid,
-        'refs': refs,
-        'abstract': abstract
-    }
+    f.readline()  # consume blank line
+    return Record(
+        id=paperid,
+        title=title,
+        authors=authors,
+        year=year,
+        venue=venue,
+        refs=refs,
+        abstract=abstract
+    )
 
 
 def castrecord(record):
@@ -85,17 +98,12 @@ def castrecord(record):
     return record
 
 
-def iterdata(fpath):
+def iterrecords(fpath):
     with open(fpath) as f:
         record = nextrecord(f)
         while record is not None:
             yield record
-            f.readline()  # consume blank line
             record = nextrecord(f)
-
-
-def iterrecords(fpath):
-    return (castrecord(record) for record in iterdata(fpath))
 
 
 def insert(conn, ins):
@@ -122,7 +130,16 @@ def person_insert(conn, name):
         return p['id']
 
     ins = db.person.insert().values(name=name)
-    res = conn.execute(ins)
+    try:
+        res = conn.execute(ins)
+    except sa.exc.IntegrityError:  # concurrency issue
+        res = conn.execute(sel, n=name)
+        p = res.first()
+        if p is None:
+            raise
+        else:
+            return p['id']
+
     return res.inserted_primary_key[0]
 
 
@@ -130,12 +147,12 @@ def process_record(record):
     """Update the database with the contents of the record."""
     logging.debug('processing record\n%s' % record);
     conn = db.engine.connect()
-    paper_id = record['id']
+    paper_id = record.id
 
     ins = db.papers.insert().\
-            values(id=paper_id, title=record['title'],
-                   venue=record['venue'], year=record['year'],
-                   abstract=record['abstract'])
+            values(id=paper_id, title=record.title,
+                   venue=record.venue, year=record.year,
+                   abstract=record.abstract)
 
     # attempt to insert a new paper into the db
     result = insert(conn, ins)
@@ -145,12 +162,12 @@ def process_record(record):
         return False
 
     # make new records for each author
-    for author in record['authors']:
+    for author in record.authors:
         person_id = person_insert(conn, author)
         ins = db.authors.insert().values(paper=paper_id, person=person_id)
         insert(conn, ins)  # may fail, but we don't really care
 
-    for ref in record['refs']:
+    for ref in record.refs:
         ins = db.refs.insert().values(paper=paper_id, ref=ref)
         insert(conn, ins)
 
