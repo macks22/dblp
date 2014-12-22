@@ -84,26 +84,36 @@ def spie_lookup(root):
     result = root.xpath('//span[@class="Abstract"]/p/text()')
     return result[0] if result else None
 
-def abstract_lookup(doi_link):
-    print doi_link
-    r = requests.get(doi_link)
-    root = lxml.html.fromstring(r.content)
-    try:
-        text = r.headers['set-cookie']
-        m = re.match('.*?domain=((\.[a-zA-Z]*)*)[; ].*', text, re.IGNORECASE)
-        domain = m.groups()[0] if m else ''
-    except KeyError:
-        domain = ''
+def jmlr_lookup(root):
+    result = root.xpath(
+        '//div[@id="content"]/text()|//div[@id="content"]/i/text()')
+    return ' '.join([t.strip() for t in result if t.strip()]).replace('\n','')
 
-    if not domain:
-        if 'x-origin-server' in r.headers:
-            domain = r.headers['x-origin-server']
-        elif 'serverid' in r.headers:
-            domain = r.headers['serverid']
-        elif 'link' in r.headers:
-            domain = r.headers['link']
-        else:
-            domain = r.url
+def acm_lookup(link):
+    driver = webdriver.Chrome()
+    driver.get(link)
+    wait = selui.WebDriverWait(driver, 10)
+    try:
+        div = wait.until(
+            lambda driver: driver.find_element_by_xpath(
+                '//div[@id="abstract"]/div/div'))
+        abstract = div.text
+    except Exception:
+        abstract = None
+    finally:
+        driver.close()
+    return abstract
+
+def nips_lookup(root):
+    result = root.xpath('//p[@class="abstract"]/text()')
+    return result[0] if result else None
+
+
+def abstract_lookup(link):
+    print link
+    r = requests.get(link)
+    root = lxml.html.fromstring(r.content)
+    domain = r.url
 
     if 'ieee' in domain:
         abstract = ieee_lookup(root)
@@ -118,19 +128,25 @@ def abstract_lookup(doi_link):
     elif 'wiley' in domain:
         abstract = wiley_lookup(root)
     elif 'sciencedirect' in domain:
-        abstract = sciencedirect_lookup(doi_link)
+        abstract = sciencedirect_lookup(link)
     elif 'degruyter' in domain:
         abstract = degruyter_lookup(root)
     elif 'projecteuclid' in domain:
         abstract = projecteuclid_lookup(root)
     elif 'spiedigitallibrary' in domain:
         abstract = spie_lookup(root)
+    elif 'jmlr' in domain:
+        abstract = jmlr_lookup(root)
+    elif 'acm' in domain:
+        abstract = acm_lookup(link)
+    elif 'nips' in domain:
+        abstract = nips_lookup(root)
     else:
-        print 'unknown domain: %s (%s)' % (domain, doi_link)
+        print 'unknown domain: %s (%s)' % (domain, link)
         abstract = None
 
     if abstract is None:
-        print 'no abstract resolved: %s (%s)' % (domain, doi_link)
+        print 'no abstract resolved: %s (%s)' % (domain, link)
     return abstract
 
 
