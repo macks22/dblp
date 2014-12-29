@@ -1,42 +1,72 @@
 import re
-import os
 import sys
+import csv
+import codecs
 import logging
 import argparse
-import multiprocessing as mp
-
-import sqlalchemy as sa
-
-import db
-
-class Record(object):
-    __slots__ = ['id', 'title', 'authors', 'venue', 'refs', 'abstract', 'year']
-
-    def __init__(self, id, title, authors, venue, refs, abstract, year):
-        self.id = int(id)
-        self.title = title
-        self.venue = venue
-        self.refs = [int(ref) for ref in refs]
-        self.abstract = abstract if abstract else None
-        self.year = int(year) if year else None
-        self.authors = [a for a in authors.split(',') if a]
+import cStringIO
 
 
+# Regexes for record parsing
 title_pattern = re.compile("#\*([^\r\n]*)")
 author_pattern = re.compile("#@([^\r\n]*)")
-year_pattern = re.compile("#t([0-9]*)")
+affiliations_pattern = re.compile("#o([^\r\n]*)")
+year_pattern = re.compile("#t ([0-9]*)")
 venue_pattern = re.compile("#c([^\r\n]*)")
 id_pattern = re.compile("#index([^\r\n]*)")
 refs_pattern = re.compile("#%([^\r\n]*)")
 abstract_pattern = re.compile("#!([^\r\n]*)")
 
 
+class UnicodeWriter(object):
+    """A CSV writer which will write rows to CSV file "f",
+    which is encoded in the given encoding.
+    """
+
+    def __init__(self, f, dialect=csv.excel, encoding="utf-8", **kwds):
+        self.queue = cStringIO.StringIO()  # Redirect output to a queue
+        self.writer = csv.writer(self.queue, dialect=dialect, **kwds)
+        self.stream = f
+        self.encoder = codecs.getincrementalencoder(encoding)()
+
+    def writerow(self, row):
+        self.writer.writerow([s.encode("utf-8") for s in row])
+        # Fetch UTF-8 output from the queue ...
+        data = self.queue.getvalue()
+        data = data.decode("utf-8")
+        # ... and reencode it into the target encoding
+        data = self.encoder.encode(data)
+        self.stream.write(data)  # write to the target stream
+        self.queue.truncate(0)  # empty queue
+
+    def writerows(self, rows):
+        for row in rows:
+            self.writerow(row)
+
+
+class Record(object):
+    __slots__ = ['id', 'title', 'authors', 'venue', 'refs', 'year', 'abstract']
+
+    csv_header = ('id', 'title', 'venue', 'year', 'abstract')
+
+    def __init__(self, id, title, authors, venue, refs, abstract, year):
+        self.id = int(id)
+        self.title = title
+        self.venue = venue
+        self.refs = [int(ref) for ref in refs]
+        self.year = int(year) if year else None
+        self.authors = [a for a in authors.split(',') if a]
+        self.abstract = abstract if abstract else None
+
+    @property
+    def csv_attrs(self):
+        attrs = [getattr(self, attr) for attr in self.csv_header]
+        return [unicode(attr) if attr else u'' for attr in attrs]
+
+
 def match(line, pattern):
     m = pattern.match(line)
-    if m:
-        return m.groups()[0].decode('utf-8').strip()
-    else:
-        return None
+    return m.groups()[0].decode('utf-8').strip() if m else None
 
 
 def fmatch(f, pattern):
@@ -47,17 +77,15 @@ def nextrecord(f):
     """Assume file pos is at beginning of record and read to end. Returns all
     components as a dict.
     """
+    paperid = fmatch(f, id_pattern)
     title = fmatch(f, title_pattern)
     if title is None:
         return None
 
-    if len(title) > 255:
-        title = title[0:255]
-
     authors = fmatch(f, author_pattern)
+    f.readline()  # discard affiliation info
     year = fmatch(f, year_pattern)
     venue = fmatch(f, venue_pattern)
-    paperid = fmatch(f, id_pattern)
 
     # read out reference list
     refs = []
@@ -70,8 +98,8 @@ def nextrecord(f):
         m = match(line, refs_pattern)
 
     abstract = match(line, abstract_pattern)
+    if line.strip(): f.readline()  # consume blank line
 
-    f.readline()  # consume blank line
     return Record(
         id=paperid,
         title=title,
@@ -106,94 +134,36 @@ def iterrecords(fpath):
             record = nextrecord(f)
 
 
-def insert(conn, ins):
-    """Attempt to run an insertion statement; return results, None if error."""
-    try:
-        ins_res = conn.execute(ins)
-    except sa.exc.IntegrityError as err:
-        # a paper already exists with this id
-        logging.error(str(err))
-        return None
-    except Exception as e:
-        logging.error('unexpected exception\n%s', str(e))
-        return None
-    else:
-        return ins_res
+def write_records_to_csv(records, ppath='papers.csv', rpath='refs.csv'):
+    """Write the records to csv files.
+    :param str ppath: Path of file to write paper records to.
+    :param str rpath: Path of file to write paper references to.
+    """
+    pf = open(ppath, 'w')
+    rf = open(rpath, 'w')
+    paper_writer = UnicodeWriter(pf)  # handle titles/abstracts
+    refs_writer = csv.writer(rf)
 
+    # write csv column headers
+    paper_writer.writerow(Record.csv_header)
+    refs_writer.writerow(('paper_id', 'ref_id'))
 
-def person_insert(conn, name):
-    sel = sa.sql.text("SELECT id FROM person WHERE LOWER(name)=LOWER(:n)")
-    res = conn.execute(sel, n=name)
-    p = res.first()
+    # accumulate list of unique years and venues
+    venues = set()
+    years = set()
 
-    if p is not None:
-        return p['id']
+    for record in records:
+        venues.add(record.venue)
+        years.add(record.year)
+        paper_writer.writerow(record.csv_attrs)
+        for ref in record.refs:
+            refs_writer.writerow((record.id, ref))
 
-    ins = db.person.insert().values(name=name)
-    try:
-        res = conn.execute(ins)
-    except sa.exc.IntegrityError:  # concurrency issue
-        res = conn.execute(sel, n=name)
-        p = res.first()
-        if p is None:
-            raise
-        else:
-            return p['id']
+    with open('venues.csv', 'w') as f:
+        f.write('\n'.join(venues).encode('utf-8'))
 
-    return res.inserted_primary_key[0]
-
-
-def process_record(record):
-    """Update the database with the contents of the record."""
-    logging.debug('processing record\n%s' % record);
-    conn = db.engine.connect()
-    paper_id = record.id
-
-    ins = db.papers.insert().\
-            values(id=paper_id, title=record.title,
-                   venue=record.venue, year=record.year,
-                   abstract=record.abstract)
-
-    # attempt to insert a new paper into the db
-    result = insert(conn, ins)
-    if result is None:
-        # since ids come from data, we've already processed this record
-        conn.close()
-        return False
-
-    # make new records for each author
-    for author in record.authors:
-        person_id = person_insert(conn, author)
-        ins = db.authors.insert().values(paper=paper_id, person=person_id)
-        insert(conn, ins)  # may fail, but we don't really care
-
-    for ref in record.refs:
-        ins = db.refs.insert().values(paper=paper_id, ref=ref)
-        insert(conn, ins)
-
-    conn.close()
-    return True  # success
-
-
-def process_records(fpath):
-    """Process all records in data file."""
-    processed = 0
-    successful = 0
-    for record in iterrecords(fpath):
-
-        try:
-            success = process_record(record)
-        except Exception as e:
-            logging.info('unexpected exception in `process_record`')
-            logging.error(str(e))
-            success = False
-
-        processed += 1
-        if success:
-            successful += 1
-        if processed % 20 == 0:
-            logging.info('processed:  %d records' % processed)
-            logging.info('successful: %d' % successful)
+    with open('years.csv', 'w') as f:
+        f.write(u'\n'.join(map(str, years)))
 
 
 def make_parser():
@@ -203,40 +173,20 @@ def make_parser():
         'fpath', action='store',
         help='file to parse data from')
     parser.add_argument(
-        '-v', '--verbose', action='store_true',
-        help="turn on verbose logging")
+        '-p', '--paper-out-file', action='store', default='papers',
+        help='name of file to output csv papers to')
     parser.add_argument(
-        '-vv', '--very-verbose', action='store_true',
-        help='turn on very verbose logging')
+        '-r', '--refs-out-file', action='store', default='refs',
+        help='name of file to output csv references to')
     return parser
 
 
 if __name__ == "__main__":
     parser = make_parser()
     args = parser.parse_args()
-
-    if args.verbose:
-        logging.basicConfig(
-            level=logging.INFO,
-            format='[%(asctime)s][%(levelname)s]: %(message)s')
-    elif args.very_verbose:
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='[%(asctime)s][%(levelname)s]: %(message)s')
-        db.engine.echo = True
-    else:
-        logging.basicConfig(level=logging.CRITICAL)
-        db.engine.echo = False
-
-    # f = open(args.fpath)
-    # r = nextrecord(f)
-    # c = castrecord(r)
-
-    try:
-        process_records(args.fpath)
-    except Exception as err:
-        logging.info('ERROR OCCURED IN `process_records`')
-        logging.error(str(err))
-        sys.exit(-1)
-
-    sys.exit(0)
+    papers = iterrecords(args.fpath)
+    fmt_string = '%s.csv'
+    write_records_to_csv(
+        papers,
+        fmt_string % args.paper_out_file,
+        fmt_string % args.refs_out_file)
