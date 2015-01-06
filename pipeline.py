@@ -1,11 +1,69 @@
 
 # ---------------------------------------------------------
+# filter data to a range of years
+# ---------------------------------------------------------
+
+import os, sys
+
+start = 2009
+end = 2014
+
+# filter the papers by year
+df = pd.read_csv('paper-with-venue-and-year.csv')
+df['year'] = df['year'].astype(int)
+df = df[(df['year'] >= start) & (df['year'] <= end)]
+
+# load authors and refs for later
+author_df = pd.read_csv('author.csv')
+person_df = pd.read_csv('person.csv')
+refs_df = pd.read_csv('refs.csv')
+
+# change to new dir to prepare to write new set of files
+newdir = 'newdata'
+init_wd = os.getcwd()
+try: os.mkdir(newdir)
+except OSError: pass
+os.chdir(newdir)
+
+# write new paper.csv file
+df.to_csv('paper.csv', index=False)
+
+# write new venue listing
+rows = sorted([(venue,) for venue in df['venue'].unique()])
+with open('venue.csv', 'w') as f:
+    writer = csv.writer(f)
+    writer.writerows(rows)
+
+# write new year listing
+rows = sorted([(year,) for year in df['year'].unique()])
+with open('year.csv', 'w') as f:
+    writer = csv.writer(f)
+    writer.writerows(rows)
+
+# filter authors and refs to only those in the filtered time range
+paper_ids = df['id'].unique()
+author_df = author_df[author_df['paper_id'].isin(paper_ids)]
+author_ids = author_df['author_id'].unique()
+person_df = person_df[person_df['id'].isin(author_ids)]
+refs_df = refs_df[(refs_df['paper_id'].isin(paper_ids)) &
+                  (refs_df['ref_id'].isin(paper_ids))]
+
+# now write the filtered records
+author_df.to_csv('author.csv', index=False)
+person_df.to_csv('person.csv', index=False)
+refs_df.to_csv('refs.csv', index=False)
+
+# all done; restore previous working directory
+os.chdir(init_wd)
+
+
+# ---------------------------------------------------------
 # build repdocs for each paper
 # ---------------------------------------------------------
 
 import csv, doctovec
-papers_file = 'paper.csv'
 
+papers_file = 'paper.csv'
 f = open(papers_file)
 reader = csv.reader(f)
 reader.next()
@@ -34,72 +92,34 @@ vec_file.close()
 # parse repdocs into author vectors
 # ---------------------------------------------------------
 
-from pandas import DataFrame
-import csv
+import csv, pandas as pd
+
+def write_csv(fname, header, rows):
+    with open('%s.csv' % fname, 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(rows)
 
 # big memory demand
-df = DataFrame.from_csv('repdoc-by-paper-vectors.csv')
-df.fillna('')
+df = pd.read_csv('repdoc-by-paper-vectors.csv', index_col=(0,))
+df.fillna('', inplace=True)
 
 # read out authorship records
 authors_file = 'author.csv'
-f = open(authors_file)
-reader = csv.reader(f)
-reader.next()
-pairs = ((int(person_id), int(paper_id)) for person_id, paper_id in reader)
+author_df = pd.read_csv(authors_file, header=0, index_col=(0,))
 
 # initialize repdoc dictionary from complete list of person ids
-person_file = 'person.csv'
-with open(person_file) as f:
-    reader = csv.reader(f)
-    reader.next()
-    ids = (int(r[0]) for r in reader)
-    repdocs = {i: [] for i in ids}
+author_ids = author_df.index.unique()
+repdocs = {i: [] for i in author_ids}
 
 # build up repdocs for each author
-for person_id, paper_id in pairs:
+for person_id, paper_id in author_df.itertuples():
     doc = df.loc[paper_id]['doc']
-    if isinstance(doc, basestring) and doc:
-        repdocs[person_id].append(doc)
+    repdocs[person_id].append(doc)
 
 # save repdocs
-out = open('repdoc-by-author-vectors.csv', 'w')
-writer = csv.writer(out)
-writer.writerow(('author_id', 'doc'))
 rows = ((person_id, '|'.join(docs)) for person_id, docs in repdocs.iteritems())
-writer.writerows(rows)
-out.close()
-
-# ---------------------------------------------------------
-# convert author repdocs to tf/tfidf corpuses
-# ---------------------------------------------------------
-
-import gensim, sys
-
-# build dictionary of terms from repdocs
-f = open('repdoc-by-author-vectors.csv')
-csv.field_size_limit(sys.maxint)
-reader = csv.reader(f)
-reader.next()
-corpus = (doc.split('|') for author_id, doc in reader)
-dictionary = gensim.corpora.Dictionary(corpus)
-dictionary.save('repdoc-corpus.dict')
-
-# write term frequency corpus
-f.seek(0)
-reader.next()
-corpus = (doc.split('|') for author_id, doc in reader)
-bow_corpus = (dictionary.doc2bow(doc) for doc in corpus)
-fname = 'repdocs-corpus-tf.mm'
-gensim.corpora.MmCorpus.serialize(fname, bow_corpus)
-f.close()
-
-# write tfidf corpus
-bow_corpus = gensim.corpora.MmCorpus(fname)
-tfidf = gensim.models.TfidfModel(bow_corpus)
-tfidf_corpus = tfidf[bow_corpus]
-fname = 'repdocs-corpus-tfidf.mm'
-gensim.corpora.MmCorpus.serialize(fname, tfidf_corpus)
+write_csv('repdoc-by-author-vectors', ('author_id', 'doc'), rows)
 
 # -----------------------------------------------------------
 # build paper citation graph using paper.csv
@@ -107,20 +127,20 @@ gensim.corpora.MmCorpus.serialize(fname, tfidf_corpus)
 
 import igraph, csv
 
-# get paper ids from csv file
+# get paper ids from csv file and add to graph
 refg = igraph.Graph()
 papers_file = 'paper.csv'
+
 with open(papers_file) as f:
     reader = csv.reader(f)
     reader.next()
     paper_ids = (r[0] for r in reader)
-
-    # add all papers to graph
     refg.add_vertices(paper_ids)
 
-# paper id to node id mapping
+# paper id to node id mapping; make and save
 idmap = {v['name']: v.index for v in refg.vs}
-assert(len(idmap) == len(refg.vs))
+rows = idmap.iteritems()
+write_csv('paper-id-to-node-id-map', ('paper_id', 'node_id'), rows)
 
 # now add venues to vertices as paper attributes
 with open(papers_file) as f:
@@ -159,13 +179,7 @@ with open(refs_file) as f:
 
 # save graph
 refg.write_picklez('paper-cocitation-graph.pickle.gz')
-
-# save id map from paper ids to node ids
-rows = idmap.iteritems()
-with open('paper-id-to-node-id-map.csv', 'w') as f:
-    writer = csv.writer(f)
-    writer.writerow(('paper_id', 'node_id'))
-    writer.writerows(rows)
+refg.write_graphmlz('paper-cocitation-graph.graphml.gz')
 
 # -----------------------------------------------------------
 # build author cocitation graph using paper cocitation graph
@@ -173,29 +187,24 @@ with open('paper-id-to-node-id-map.csv', 'w') as f:
 
 # reload idmap and paper cocitation graph
 # -----------------------------------------------------------------------------
-fname = 'raw-id-to-node-id-map.csv'
+fname = 'paper-id-to-node-id-map.csv'
 mapfile = open(fname)
 mapreader = csv.reader(mapfile)
 mapreader.next()
-idmap = {int(r[0]): int(r[1]) for r in mapreader}
+idmap = {r[0]: int(r[1]) for r in mapreader}
 
-refg = igraph.Graph.Read_picklez('paper-cocitation-graph.pickle.gz')
+refg = igraph.Graph.Read_Picklez('paper-cocitation-graph.pickle.gz')
 assert(len(idmap) == len(refg.vs))
 # -----------------------------------------------------------------------------
 # start here if continuing from above
 
+import pandas as pd
+
 # get person IDs
-with open('person.csv') as f:
-    reader = csv.reader(f)
-    reader.next()
-    author_ids = [author_id for author_id, name in reader]
+df = pd.read_csv('person.csv', header=0, usecols=(0,))
+author_ids = df['id'].values
 
 # get author records to build edges from
-with open('author.csv') as f:
-    reader = csv.reader(f)
-    reader.next()
-    rows = [(idmap[paper_id], author_id) for author_id, paper_id in reader]
-
 def get_paper_edges(paper_id, author_id):
     """Return a list of author-to-author edges for each paper."""
     node = refg.vs[paper_id]
@@ -213,21 +222,32 @@ def get_edges(rows):
             yield edge
 
 # build the author cocitation graph and save it
-authorg = igraph.Graph()
+def build_undirected_graph(nodes, edges):
+    graph = igraph.Graph()
+    graph.add_vertices(nodes)
+    graph.add_edges(edges)
+    graph.simplify()
+    return graph
+
+f = open('author.csv')
+reader = csv.reader(f)
+reader.next()
+rows = ((idmap[paper_id], author_id) for author_id, paper_id in reader)
 edges = get_edges(rows)
-authorg.add_vertices(author_ids)
-authorg.add_edges(edges)
-authorg.simplify()  # remove duplicate edges
+nodes = (str(author_id) for author_id in author_ids)
+authorg = build_undirected_graph(nodes, edges)
+f.close()
+
 authorg.write_graphmlz('author-cocitation-graph.graphml.gz')
 
-
-def save_id_map(graph, outfile):
-    """Save vertex ID to vertex name mapping."""
+def save_id_map(graph, outfile, idname='author'):
+    """Save vertex ID to vertex name mapping and then return it."""
+    first_col = '%s_id' % idname
     idmap = {v['name']: v.index for v in graph.vs}
     rows = idmap.iteritems()
     with open('%s.csv' % outfile, 'w') as f:
         writer = csv.writer(f)
-        writer.writerow(('author_id', 'node_id'))
+        writer.writerow((first_col, 'node_id'))
         writer.writerows(rows)
     return idmap
 
@@ -248,60 +268,111 @@ lcc_idmap = save_id_map(lcc, 'lcc-author-id-to-node-id-map')
 # build up ground-truth communities using venue info for LCC
 # -----------------------------------------------------------
 
-import pandas as pd
+import igraph, pandas as pd
 
-# load paper, venue info
-headers = ('id', 'venue')
-df = pd.read_table(
-    'paper.csv', sep=",", header=0,
-    index_col=('id'),
-    usecols=headers, names=headers)
+# load author, paper, venue info
+author_df = pd.read_table(
+        'author.csv', sep=",", header=0,
+        usecols=('author_id', 'paper_id'))
+paper_df = pd.read_table(
+        'paper.csv', sep=",", header=0,
+        usecols=('id', 'venue'))
+paper_df.columns = ('paper_id', 'venue')
+
+# filter authors down to those in LCC
+lcc_author_ids = set([int(v['name']) for v in lcc.vs])
+selection = author_df['author_id'].isin(lcc_author_ids)
+author_df = author_df[selection]
+merge_df = author_df.merge(paper_df)
+del merge_df['paper_id']
 
 # assign each venue an id and save the assignment
-unique_venues = df['venue'].unique()
+unique_venues = merge_df['venue'].unique()
+unique_venues.sort()
 venue_map = {venue: vnum for vnum, venue in enumerate(unique_venues)}
 rows = ((vnum, venue) for venue, vnum in venue_map.iteritems())
-with open('venue-id-map.csv', 'w') as wf:
+with open('lcc-venue-id-map.csv', 'w') as wf:
     venue_writer = csv.writer(wf)
     venue_writer.writerow(('venue_id', 'venue_name'))
     venue_writer.writerows(rows)
 
 # add venue information to LCC
 for v in lcc.vs:
-    v['venues'] = []
+    v['venues'] = set()
 
-for venue in df['venue']:
+for rownum, row in merge_df.iterrows():
+    author_id, venue = row
+    node_id = lcc_idmap[str(author_id)]
     venue_id = venue_map[venue]
-    node_id = lcc_idmap[author_id]
-    node = lcc.vs[node_id]
-    node['venues'].append(venue_id)
+    lcc.vs[node_id]['venues'].add(venue_id)
+
+for v in lcc.vs:
+    v['venues'] = tuple(v['venues'])
 
 # save a copy of the graph with venue info
 lcc.write_picklez('author-cocitation-graph-lcc.pickle.gz')
 
 # build ground truth communities
-communities = {venue_id: [] for venue_id in venue_map.values()}
+communities = {venue_id: [] for venue_id in venue_map.itervalues()}
 for v in lcc.vs:
-    for venue in v['venues']:
-        communities[venue].append(v.index)
+    for venue_id in v['venues']:
+        communities[venue_id].append(v.index)
 
 # save ground truth communities
 fname = 'lcc-ground-truth-by-venue.txt'
 comms = sorted(communities.items())
+rows = (' '.join(map(str, comm)) for comm_num, comm in comms)
 with open(fname, 'w') as f:
-    writer = csv.writer(f)
-    writer.writerow(('venue_id', 'node_id'))
-    for venue_id, node_ids in communities.iteritems():
-        rows = [(venue_id, node_id) for node_id in node_ids]
-        writer.writerows(rows)
+    f.write('\n'.join(rows))
 
 # save venue info for each author separately
-fname = 'lcc-author-venues.csv'
-records = ((v.index, v['venues']) for v in lcc.vs)
+fname = 'lcc-author-venues.txt'
+records = sorted([(v.index, v['venues']) for v in lcc.vs])
+rows = (' '.join(map(str, venues)) for node_id, venues in records)
 with open(fname, 'w') as f:
+    f.write('\n'.join(rows))
+
+# ---------------------------------------------------------
+# convert author repdocs to tf/tfidf corpuses
+# ---------------------------------------------------------
+
+import gensim, sys, csv, igraph
+
+# filter authors down to those in LCC
+df = pd.read_csv('lcc-author-id-to-node-id-map.csv', header=0, usecols=(0,))
+lcc_author_ids = df['author_id'].values
+
+# build dictionary of terms from repdocs
+with open('repdoc-by-author-vectors.csv') as f:
+    csv.field_size_limit(sys.maxint)
+    reader = csv.reader(f)
+    reader.next()
+    corpus = (doc.split('|') for author_id, doc in reader
+              if int(author_id) in lcc_author_ids)
+    dictionary = gensim.corpora.Dictionary(corpus)
+
+# save dictionary and term id mapping
+dictionary.save('lcc-repdoc-corpus.dict')
+rows = ((term_id, term.encode('utf-8'))
+        for term, term_id in dictionary.token2id.iteritems())
+with open('lcc-repdoc-corpus-term-id-map.csv', 'w') as f:
     writer = csv.writer(f)
-    writer.writerow(('node_id', 'venue_id'))
-    for node_id, venue_ids in records:
-        rows = [(node_id, venue_id) for venue_id in venue_ids]
-        writer.writerows(rows)
+    writer.writerow(('term_id', 'term'))
+    writer.writerows(rows)
+
+# write term frequency corpus
+fname = 'lcc-repdoc-corpus-tf.mm'
+with open('repdoc-by-author-vectors.csv') as f:
+    reader = csv.reader(f)
+    reader.next()
+    corpus = (doc.split('|') for author_id, doc in reader)
+    bow_corpus = (dictionary.doc2bow(doc) for doc in corpus)
+    gensim.corpora.MmCorpus.serialize(fname, bow_corpus)
+
+# write tfidf corpus
+bow_corpus = gensim.corpora.MmCorpus(fname)
+tfidf = gensim.models.TfidfModel(bow_corpus)
+tfidf_corpus = tfidf[bow_corpus]
+fname = 'lcc-repdoc-corpus-tfidf.mm'
+gensim.corpora.MmCorpus.serialize(fname, tfidf_corpus)
 
