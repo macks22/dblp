@@ -10,9 +10,8 @@ import pandas as pd
 import igraph, gensim
 import doctovec
 
-
 # INPUT FILES
-ORIG_PAPER_FILE = 'paper-with-venue-and-year.csv'
+ORIG_PAPER_FILE = 'paper-with-venue-and-year-no-single-venues.csv'
 PAPER_FILE = 'paper.csv'
 AUTHOR_FILE = 'author.csv'
 PERSON_FILE = 'person.csv'
@@ -23,11 +22,21 @@ VENUE_FILE = 'venue.csv'
 YEAR_FILE = 'year.csv'
 
 # ---------------------------------------------------------
+# remove venues that only occur once
+# ---------------------------------------------------------
+
+# import pandas as pd
+# df = pd.read_csv('paper-with-venue-and-year.csv')
+# multiple = df.groupby('venue')['venue'].transform(len) > 1
+# filt = df[multiple]
+# filt.to_csv('paper-with-venue-and-year-no-single-venue.csv')
+
+# ---------------------------------------------------------
 # filter data to a range of years
 # ---------------------------------------------------------
 
-start = 2011
-end = 2014
+start = 1994
+end = 2004
 
 # filter the papers by year
 df = pd.read_csv(ORIG_PAPER_FILE)
@@ -160,7 +169,7 @@ rows = idmap.iteritems()
 write_csv('paper-id-to-node-id-map', ('paper_id', 'node_id'), rows)
 
 # now add venues to vertices as paper attributes
-with open(papers_file) as f:
+with open(PAPERS_FILE) as f:
     reader = csv.reader(f)
     reader.next()
     records = ((r[0], r[2]) for r in reader)
