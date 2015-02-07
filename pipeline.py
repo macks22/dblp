@@ -29,7 +29,9 @@ YEAR_FILE = 'year.csv'
 # df = pd.read_csv('paper-with-venue-and-year.csv')
 # multiple = df.groupby('venue')['venue'].transform(len) > 1
 # filt = df[multiple]
-# filt.to_csv('paper-with-venue-and-year-no-single-venue.csv')
+# filt.to_csv(
+#     'paper-with-venue-and-year-no-single-venue.csv',
+#     index=False)
 
 # ---------------------------------------------------------
 # filter data to a range of years
@@ -169,7 +171,7 @@ rows = idmap.iteritems()
 write_csv('paper-id-to-node-id-map', ('paper_id', 'node_id'), rows)
 
 # now add venues to vertices as paper attributes
-with open(PAPERS_FILE) as f:
+with open(PAPER_FILE) as f:
     reader = csv.reader(f)
     reader.next()
     records = ((r[0], r[2]) for r in reader)
@@ -202,14 +204,14 @@ with open(REFS_FILE) as f:
     refg.add_edges(edges)
 
 # save graph
-refg.write_picklez('paper-cocitation-graph.pickle.gz')
-refg.write_graphmlz('paper-cocitation-graph.graphml.gz')
+refg.write_picklez('paper-citation-graph.pickle.gz')
+refg.write_graphmlz('paper-citation-graph.graphml.gz')
 
 # -----------------------------------------------------------
-# build author cocitation graph using paper cocitation graph
+# build author citation graph using paper citation graph
 # -----------------------------------------------------------
 
-# reload idmap and paper cocitation graph
+# reload idmap and paper citation graph
 # -----------------------------------------------------------------------------
 # fname = 'paper-id-to-node-id-map.csv'
 # mapfile = open(fname)
@@ -217,7 +219,7 @@ refg.write_graphmlz('paper-cocitation-graph.graphml.gz')
 # mapreader.next()
 # idmap = {r[0]: int(r[1]) for r in mapreader}
 # 
-# refg = igraph.Graph.Read_Picklez('paper-cocitation-graph.pickle.gz')
+# refg = igraph.Graph.Read_Picklez('paper-citation-graph.pickle.gz')
 # assert(len(idmap) == len(refg.vs))
 # -----------------------------------------------------------------------------
 # start here if continuing from above
@@ -245,7 +247,7 @@ def get_edges(rows):
         for edge in edges:
             yield edge
 
-# build the author cocitation graph and save it
+# build the author citation graph and save it
 def build_undirected_graph(nodes, edges):
     graph = igraph.Graph()
     graph.add_vertices(nodes)
@@ -261,7 +263,7 @@ with open(AUTHOR_FILE) as f:
     nodes = (str(author_id) for author_id in author_ids)
     authorg = build_undirected_graph(nodes, edges)
 
-authorg.write_graphmlz('author-cocitation-graph.graphml.gz')
+authorg.write_graphmlz('author-citation-graph.graphml.gz')
 
 def save_id_map(graph, outfile, idname='author'):
     """Save vertex ID to vertex name mapping and then return it."""
@@ -282,8 +284,8 @@ components = authorg.components()
 lcc = components.giant()
 
 # save the LCC and its id mapping
-lcc.write_graphmlz('lcc-author-cocitation-graph.graphml.gz')
-lcc.write_edgelist('lcc-author-cocitation-graph-edgelist.txt')
+lcc.write_graphmlz('lcc-author-citation-graph.graphml.gz')
+lcc.write_edgelist('lcc-author-citation-graph-edgelist.txt')
 lcc_idmap = save_id_map(lcc, 'lcc-author-id-to-node-id-map')
 
 
@@ -333,7 +335,7 @@ for v in lcc.vs:
     v['venues'] = tuple(v['venues'])
 
 # save a copy of the graph with venue info
-lcc.write_picklez('lcc-author-cocitation-graph.pickle.gz')
+lcc.write_picklez('lcc-author-citation-graph.pickle.gz')
 
 # build ground truth communities
 communities = {venue_id: [] for venue_id in venue_map.itervalues()}
@@ -374,6 +376,9 @@ with open('repdoc-by-author-vectors.csv') as f:
               if int(author_id) in lcc_author_ids)
     dictionary = gensim.corpora.Dictionary(corpus)
 
+# filter out terms that occur in only one document
+dictionary.filter_extremes(2, 1, len(dictionary))
+
 # save dictionary and term id mapping
 dictionary.save('lcc-repdoc-corpus.dict')
 rows = [(term_id, term.encode('utf-8'))
@@ -405,30 +410,38 @@ gensim.corpora.MmCorpus.serialize(fname, tfidf_corpus)
 # produce CESNA/CODA/EDCAR formatted data files
 # -----------------------------------------------------------------------------
 
+def swap_file_delim(infile, indelim, outfile, outdelim):
+    with open(infile) as rf:
+        in_lines = (l.strip().split(indelim) for l in rf)
+        out_lines = (outdelim.join(l) for l in in_lines)
+        with open(outfile, 'w') as wf:
+            wf.write('\n'.join(out_lines))
+
 # CODA requires only a tsv edgelist
-with open('lcc-author-cocitation-graph-edgelist.txt') as rf:
-    in_lines = (l.strip().split() for l in rf)
-    out_lines = ('\t'.join(l) for l in in_lines)
-    with open('lcc-author-cocitation-graph-edgelist.tsv', 'w') as wf:
-        wf.write('\n'.join(out_lines))
+swap_file_delim(
+    'lcc-author-citation-graph-edgelist.txt', ' ',
+    'lcc-author-citation-graph-edgelist.tsv', '\t')
 
 # CESNA requires the same edgelist as CODA, but also requires
 # (1) (node_id \t term_id) pairs for all term features
-with open('lcc-repdoc-corpus-term-id-map.csv') as rf:
-    reader = csv.reader(rf)
-    reader.next()
-    out_lines = ('\t'.join(l) for l in reader)
-    with open('lcc-repdoc-corpus-term-id-map.tsv', 'w') as wf:
-        wf.write('\n'.join(out_lines))
+swap_file_delim(
+    'lcc-repdoc-corpus-term-id-map.csv', ',',
+    'lcc-repdoc-corpus-term-id-map.tsv', '\t')
 
 # (2) (term_id \t term) pairs for all terms in the corpus
 # note that because this is mm format, we need to subtract 1 from all ids
-with open('lcc-repdoc-corpus-tf.mm') as rf:
-    rf.readline()  # discard format line
-    rf.readline()  # discard col count line
-    in_lines = (l.strip().split() for l in rf)
-    ids = (map(int, line[:2]) for line in in_lines)
-    transform = ((node_id - 1, term_id - 1) for node_id, term_id in ids)
-    out_lines = ('%d\t%d' % (node_id, term_id) for node_id, term_id in transform)
-    with open('lcc-repdoc-corpus-author-term-presence.tsv', 'w') as wf:
-        wf.write('\n'.join(out_lines))
+corpus = gensim.corpora.MmCorpus('lcc-repdoc-corpus-tf.mm')
+with open('lcc-repdoc-corpus-author-term-presence.tsv', 'w') as wf:
+    docs_with_tf = (
+        docnum, corpus.docbyoffset(offset)
+        for docnum, offset in enumerate(corpus.index))
+    docs_as_pairs = (
+        zip([docnum] * len(doc), [term_id for term_id, _ in doc])
+        for docnum, doc in docs_with_tf)
+    docs_as_lines = (
+        ['%s\t%s' % (docid, termid) for docid, termid in pairs]
+        for pairs in docs_as_pairs)
+    docs = ('\n'.join(lines) for lines in docs_as_lines)
+
+    for doc in docs:
+        wf.write('\n'.join(doc))
