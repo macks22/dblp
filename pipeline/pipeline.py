@@ -21,17 +21,36 @@ REFS_FILE = 'refs.csv'
 VENUE_FILE = 'venue.csv'
 YEAR_FILE = 'year.csv'
 
+
+def write_csv(fname, header, rows):
+    """Write an iterable of records to a csv file with optional header."""
+    with open('%s.csv' % fname, 'w') as f:
+        writer = csv.writer(f)
+        if header: writer.writerow(header)
+        writer.writerows(rows)
+
+def yield_csv_records(csv_file):
+    with open(csv_file) as f:
+        reader = csv.reader(f)
+        reader.next()
+        for record in reader:
+            yield record
+
 # ---------------------------------------------------------
 # remove venues that only occur once
 # ---------------------------------------------------------
 
-# import pandas as pd
-# df = pd.read_csv('paper-with-venue-and-year.csv')
-# multiple = df.groupby('venue')['venue'].transform(len) > 1
-# filt = df[multiple]
-# filt.to_csv(
-#     'paper-with-venue-and-year-no-single-venue.csv',
-#     index=False)
+import pandas as pd
+
+infile = 'paper-with-venue-and-year.csv'
+outfile = 'paper-with-venue-and-year-no-single-venue.csv'
+def remove_single_venues(paper_file, outfile):
+    df = pd.read_csv(paper_file))
+    multiple = df.groupby('venue')['venue'].transform(len) > 1
+    filtered = df[multiple]
+    filtered.to_csv(outfile, index=False)
+
+remove_single_venues(infile, outfile)
 
 # ---------------------------------------------------------
 # filter data to a range of years
@@ -40,84 +59,100 @@ YEAR_FILE = 'year.csv'
 start = 1994
 end = 2004
 
-# filter the papers by year
-df = pd.read_csv(ORIG_PAPER_FILE)
-df['year'] = df['year'].astype(int)
-df = df[(df['year'] >= start) & (df['year'] <= end)]
+def filter_by_year_range(start, end):
+    # filter the papers by year
+    df = pd.read_csv(ORIG_PAPER_FILE)
+    df['year'] = df['year'].astype(int)
+    df = df[(df['year'] >= start) & (df['year'] <= end)]
 
-# load authors and refs for later filtering
-author_df = pd.read_csv(AUTHOR_FILE)
-person_df = pd.read_csv(PERSON_FILE)
-refs_df = pd.read_csv(REFS_FILE)
+    # load authors and refs for later filtering
+    author_df = pd.read_csv(AUTHOR_FILE)
+    person_df = pd.read_csv(PERSON_FILE)
+    refs_df = pd.read_csv(REFS_FILE)
 
-# change to new dir to prepare to write new set of files
-newdir = '%d-to-%d' % (start, end)
-init_wd = os.getcwd()
-try: os.mkdir(newdir)
-except OSError: pass
-os.chdir(newdir)
+    # change to new dir to prepare to write new set of files
+    newdir = '%d-to-%d' % (start, end)
+    init_wd = os.getcwd()
+    try: os.mkdir(newdir)
+    except OSError: pass
+    os.chdir(newdir)
 
-# write new paper.csv file
-df.to_csv(PAPER_FILE, index=False)
+    # write new paper.csv file
+    df.to_csv(PAPER_FILE, index=False)
 
-# write new venue listing
-rows = sorted([(venue,) for venue in df['venue'].unique()])
-with open(VENUE_FILE, 'w') as f:
-    writer = csv.writer(f)
-    writer.writerows(rows)
+    # write new venue listing
+    rows = sorted([(venue,) for venue in df['venue'].unique()])
+    write_csv(VENUE_FILE, None, rows)
 
-# write new year listing
-rows = sorted([(year,) for year in df['year'].unique()])
-with open(YEAR_FILE, 'w') as f:
-    writer = csv.writer(f)
-    writer.writerows(rows)
+    # write new year listing
+    rows = sorted([(year,) for year in df['year'].unique()])
+    write_csv(YEAR_FILE, None, rows)
 
-# filter authors and refs to only those in the filtered time range
-paper_ids = df['id'].unique()
-author_df = author_df[author_df['paper_id'].isin(paper_ids)]
-author_ids = author_df['author_id'].unique()
-person_df = person_df[person_df['id'].isin(author_ids)]
-refs_df = refs_df[(refs_df['paper_id'].isin(paper_ids)) &
-                  (refs_df['ref_id'].isin(paper_ids))]
+    # filter authors and refs to only those in the filtered time range
+    paper_ids = df['id'].unique()
+    author_df = author_df[author_df['paper_id'].isin(paper_ids)]
+    author_ids = author_df['author_id'].unique()
+    person_df = person_df[person_df['id'].isin(author_ids)]
+    refs_df = refs_df[(refs_df['paper_id'].isin(paper_ids)) &
+                      (refs_df['ref_id'].isin(paper_ids))]
 
-# now write the filtered records
-author_df.to_csv(AUTHOR_FILE, index=False)
-person_df.to_csv(PERSON_FILE, index=False)
-refs_df.to_csv(REFS_FILE, index=False)
+    # now write the filtered records
+    author_df.to_csv(AUTHOR_FILE, index=False)
+    person_df.to_csv(PERSON_FILE, index=False)
+    refs_df.to_csv(REFS_FILE, index=False)
 
-# all done; restore previous working directory
-# os.chdir(init_wd)
+    # All done; restore previous working directory
+    os.chdir(init_wd)
+
+# Now actually do the filtering
+filter_by_year_range(start, end)
 
 
 # ---------------------------------------------------------
 # build repdocs for each paper
 # ---------------------------------------------------------
 
-import csv, doctovec
+import csv
+import gensim
+import doctovec
 
-f = open(PAPER_FILE)
-reader = csv.reader(f)
-reader.next()
-records = ((r[0], '%s %s' % (r[1], r[4])) for r in reader)
-docs = ((docid, doc.decode('utf-8')) for docid, doc in records)
+def read_repdocs(papers_file):
+    with open(papers_file) as f:
+        reader = csv.reader(f)
+        reader.next()
+        records = ((r[0], '%s %s' % (r[1], r[4])) for r in reader)
+        for doid, doc in records:
+            yield (docid, doc.decode('utf-8'))
 
-doc_file = open('repdoc-by-paper.csv', 'w')
-vec_file = open('repdoc-by-paper-vectors.csv', 'w')
-doc_writer = csv.writer(doc_file)
-vec_writer = csv.writer(vec_file)
-headers = ('paper_id', 'doc')
-doc_writer.writerow(headers)
-vec_writer.writerow(headers)
+def write_paper_repdocs(docs, outfile='repdoc-by-paper.csv'):
+    with open(outfile, 'w') as doc_file:
+        doc_writer = csv.writer(doc_file)
+        doc_writer.writerow(('paper_id', 'doc'))
+        for docid, doc in docs:
+            doc_writer.writerow((docid, doc.encode('utf-8')))
+            yield (docid, doc)
 
-for docid, doc in docs:
-    doc_writer.writerow((docid, doc.encode('utf-8')))
-    vector = doctovec.doctovec(doc)
-    concat = '|'.join(vector).encode('utf-8')
-    vec_writer.writerow((docid, concat))
+def write_paper_repdoc_vectors(docs, outfile='repdoc-by-paper-vectors.csv')
+    with open(outfile, 'w') as vec_file:
+        vec_writer = csv.writer(vec_file)
+        vec_writer.writerow(('paper_id', 'doc'))
+        for docid, doc in docs:
+            vector = doctovec.doctovec(doc)
+            concat = '|'.join(vector).encode('utf-8')
+            vec_writer.writerow((docid, concat))
+            yield (docid, doc)
 
-f.close()
-doc_file.close()
-vec_file.close()
+# Set up the pipeline.
+repdocs = write_paper_repdoc_vectors(
+            write_paper_repdocs(
+                read_repdocs(PAPER_FILE)))
+
+dictionary = gensim.corpora.Dictionary(repdocs)
+print 'term count in paper repdoc corpus pre-filtering: %d' % len(dictionary)
+dictionary.filter_extremes(2, 1, len(dictionary))
+print 'term count in paper repdoc corpus post-filtering: %d' % len(dictionary)
+dictionary.save('paper-repdoc-corpus.dict')
+
 
 # ---------------------------------------------------------
 # parse repdocs into author vectors
@@ -125,31 +160,31 @@ vec_file.close()
 
 import csv, pandas as pd
 
-def write_csv(fname, header, rows):
-    with open('%s.csv' % fname, 'w') as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-        writer.writerows(rows)
 
-# big memory demand
-df = pd.read_csv('repdoc-by-paper-vectors.csv', index_col=(0,))
-df.fillna('', inplace=True)
+def build_author_repdocs(paper_repdocs_file='repdoc-by-paper-vectors.csv',
+                         author_repdocs_file='repdoc-by-author-vectors.csv'):
+    # big memory demand
+    df = pd.read_csv(paper_repdocs_file, index_col=(0,))
+    df.fillna('', inplace=True)
 
-# read out authorship records
-author_df = pd.read_csv(AUTHOR_FILE, header=0, index_col=(0,))
+    # read out authorship records
+    author_df = pd.read_csv(AUTHOR_FILE, header=0, index_col=(0,))
 
-# initialize repdoc dictionary from complete list of person ids
-author_ids = author_df.index.unique()
-repdocs = {i: [] for i in author_ids}
+    # initialize repdoc dictionary from complete list of person ids
+    author_ids = author_df.index.unique()
+    repdocs = {i: [] for i in author_ids}
 
-# build up repdocs for each author
-for person_id, paper_id in author_df.itertuples():
-    doc = df.loc[paper_id]['doc']
-    repdocs[person_id].append(doc)
+    # build up repdocs for each author
+    for person_id, paper_id in author_df.itertuples():
+        doc = df.loc[paper_id]['doc']
+        repdocs[person_id].append(doc)
 
-# save repdocs
-rows = ((person_id, '|'.join(docs)) for person_id, docs in repdocs.iteritems())
-write_csv('repdoc-by-author-vectors', ('author_id', 'doc'), rows)
+    # save repdocs
+    rows = ((person_id, '|'.join(docs))
+            for person_id, docs in repdocs.iteritems())
+    write_csv(author_repdocs_file, ('author_id', 'doc'), rows)
+
+build_author_repdocs()
 
 # -----------------------------------------------------------
 # build paper citation graph using paper.csv
@@ -157,55 +192,68 @@ write_csv('repdoc-by-author-vectors', ('author_id', 'doc'), rows)
 
 import igraph, csv
 
-# get paper ids from csv file and add to graph
-refg = igraph.Graph()
-with open(PAPER_FILE) as f:
+def read_paper_vertices(paper_file):
+    """Iterate through paper IDs from the paper csv file."""
+    with open(PAPER_FILE) as f:
+        reader = csv.reader(f)
+        reader.next()
+        for row in reader:
+            yield row[0]
+
+def read_paper_venues(paper_file):
+    """Iterate through (paper_id, venue) pairs from the paper csv file."""
     reader = csv.reader(f)
     reader.next()
-    paper_ids = (r[0] for r in reader)
-    refg.add_vertices(paper_ids)
+    for row in reader:
+        yield (row[0], row[2])
 
-# paper id to node id mapping; make and save
-idmap = {v['name']: v.index for v in refg.vs}
-rows = idmap.iteritems()
-write_csv('paper-id-to-node-id-map', ('paper_id', 'node_id'), rows)
+def read_paper_references(refs_file, idmap):
+    """Filter out references to papers outside dataset."""
+    for paper_id, ref_id in yield_csv_records(refs_file):
+        try: yield (idmap[paper_id], idmap[ref_id])
+        except: pass
 
-# now add venues to vertices as paper attributes
-with open(PAPER_FILE) as f:
-    reader = csv.reader(f)
-    reader.next()
-    records = ((r[0], r[2]) for r in reader)
-    for paper_id, venue in records:
+def build_paper_citation_graph(paper_file, author_file, refs_file,
+                               idmap_fname='paper-id-to-node-id-map',
+                               save=True, out_fname='paper-citation-graph'):
+    # get paper ids from csv file and add to graph
+    refg = igraph.Graph()
+    nodes = read_paper_vertices(PAPER_FILE)
+    refg.add_vertices(nodes)
+
+    # paper id to node id mapping; make and save
+    idmap = {v['name']: v.index for v in refg.vs}
+    rows = idmap.iteritems()
+    write_csv(idmap_fname, ('paper_id', 'node_id'), rows)
+
+    # now add venues to vertices as paper attributes
+    paper_venues = read_paper_venues(PAPER_FILE)
+    for paper_id, venue in paper_venues:
         node_id = idmap[paper_id]
         refg.vs[node_id]['venue'] = venue
 
-# finally add author ids
-for v in refg.vs:
-    v['author_ids'] = []
+    # next add author ids
+    for v in refg.vs:
+        v['author_ids'] = []
 
-with open(AUTHOR_FILE) as f:
-    reader = csv.reader(f)
-    reader.next()
+    author_records = yield_csv_records(author_file)
     for author_id, paper_id in reader:
         node_id = idmap[paper_id]
         refg.vs[node_id]['author_ids'].append(author_id)
 
-# add edges from graph references
-def iteredges(rows):
-    """Filter out references to papers outside dataset."""
-    for paper_id, ref_id in rows:
-        try: yield (idmap[paper_id], idmap[ref_id])
-        except: pass
+    # Finally add edges from citation records
+    citation_links = read_paper_references(refs_file, idmap)
+    refg.add_edges(citation_links)
 
-with open(REFS_FILE) as f:
-    reader = csv.reader(f)
-    reader.next()
-    edges = iteredges(reader)
-    refg.add_edges(edges)
+    # Save if requested
+    if save:
+        refg.write_picklez('%s.pickle.gz' % out_fname)
+        refg.write_graphmlz('%s.graphml.gz' % out_fname)
 
-# save graph
-refg.write_picklez('paper-citation-graph.pickle.gz')
-refg.write_graphmlz('paper-citation-graph.graphml.gz')
+    return refg
+
+# Build and save the graph
+build_paper_citation_graph(PAPER_FILE, AUTHOR_FILE, REFS_FILE)
 
 # -----------------------------------------------------------
 # build author citation graph using paper citation graph
@@ -375,9 +423,6 @@ with open('repdoc-by-author-vectors.csv') as f:
     corpus = (doc.split('|') for author_id, doc in reader
               if int(author_id) in lcc_author_ids)
     dictionary = gensim.corpora.Dictionary(corpus)
-
-# filter out terms that occur in only one document
-dictionary.filter_extremes(2, 1, len(dictionary))
 
 # save dictionary and term id mapping
 dictionary.save('lcc-repdoc-corpus.dict')
