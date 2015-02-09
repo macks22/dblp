@@ -37,6 +37,7 @@ import codecs
 import logging
 import argparse
 import cStringIO
+import util
 
 
 # Regexes for record parsing from papers file
@@ -167,28 +168,28 @@ def iterrecords(fpath):
 
 def write_papers_to_csv(papers, ppath='papers.csv', rpath='refs.csv'):
     """Write the records to csv files.
+
     :param str ppath: Path of file to write paper records to.
     :param str rpath: Path of file to write paper references to.
     """
-    pf = open(ppath, 'w')
-    rf = open(rpath, 'w')
-    paper_writer = UnicodeWriter(pf)  # handle titles/abstracts
-    refs_writer = csv.writer(rf)
+    with open(ppath, 'w') as pf, open(rpath), 'w') as rf:
+        paper_writer = UnicodeWriter(pf)  # handle titles/abstracts
+        refs_writer = csv.writer(rf)
 
-    # write csv column headers
-    paper_writer.writerow(Paper.csv_header)
-    refs_writer.writerow(('paper_id', 'ref_id'))
+        # write csv column headers
+        paper_writer.writerow(Paper.csv_header)
+        refs_writer.writerow(('paper_id', 'ref_id'))
 
-    # accumulate list of unique years and venues
-    venues = set()
-    years = set()
+        # accumulate list of unique years and venues
+        venues = set()
+        years = set()
 
-    for paper in papers:
-        venues.add(paper.venue)
-        years.add(paper.year)
-        paper_writer.writerow(paper.csv_attrs)
-        for ref in paper.refs:
-            refs_writer.writerow((paper.id, ref))
+        for paper in papers:
+            venues.add(paper.venue)
+            years.add(paper.year)
+            paper_writer.writerow(paper.csv_attrs)
+            for ref in paper.refs:
+                refs_writer.writerow((paper.id, ref))
 
     with open('venues.csv', 'w') as f:
         f.write('\n'.join(venues).encode('utf-8'))
@@ -209,7 +210,6 @@ def read_author_id_name_pairs(author_file):
             try:
                 index = f.readline().split()[-1]
                 name_line = f.readline().split()
-                print name_line
                 name = ' '.join(name_line[1:]).decode('utf-8')
                 read_to_newline(f)
                 yield (index, name)
@@ -219,42 +219,44 @@ def read_author_id_name_pairs(author_file):
 
 def write_author_names_to_csv(author_file, fpath='person.csv'):
     author_rows = read_author_id_name_pairs(author_file)
-    with open(fpath, 'w') as f:
-        writer = UnicodeWriter(f)
-        writer.writerow(('id', 'name'))
-        writer.writerows(author_rows)
+    util.write_csv(fpath, ('id', 'name'), author_rows)
 
 
 def write_authorships_to_csv(afile_path, fpath='author.csv'):
-    try:
-        afile = open(afile_path)
-    except IOError:
-        logging.error('authorship file not present: %s' % afile_path)
-        sys.exit(1)
-
-    records = (line.split() for line in afile)
-    rows = ((r[1], r[2]) for r in records)
-
-    with open(fpath, 'w') as f:
-        writer = csv.writer(f)
-        writer.writerow(('author_id', 'paper_id'))
-        writer.writerows(rows)
+    with open(afile_path) as afile:
+        records = (line.split() for line in afile)
+        rows = ((r[1], r[2]) for r in records)
+        util.write_csv(fpath, ('author_id', 'paper_id'), rows)
 
 
 def paper(args):
     papers = iterrecords(args.fpath)
     fmt_string = '%s.csv'
-    write_papers_to_csv(
-        papers,
-        fmt_string % args.paper_out_file,
-        fmt_string % args.refs_out_file)
+    try:
+        write_papers_to_csv(
+            papers,
+            fmt_string % args.paper_out_file,
+            fmt_string % args.refs_out_file)
+    except IOError:
+        logging.error('uanble to open paper records file: %s' % args.fpath)
+        sys.exit(1)
 
 
 def author(args):
     if args.names_file:
-        write_author_names_to_csv(args.names_file)
+        try:
+            write_author_names_to_csv(args.names_file)
+        except IOError:
+            logging.error('unable to open author names file: %s' %
+                args.names_file)
+            sys.exit(1)
     elif args.authorship_file:
-        write_authorships_to_csv(args.authorship_file)
+        try:
+            write_authorships_to_csv(args.authorship_file)
+        except IOError:
+            logging.error('unable to open authorship file: %s' %
+                args.authorship_file)
+            sys.exit(1)
 
 
 def make_parser():
@@ -262,6 +264,7 @@ def make_parser():
         description="parse dblp data")
     subparsers = parser.add_subparsers()
 
+    # Set up subcommand for parsing paper records.
     paper_parser = subparsers.add_parser(
         'paper',
         description='parse paper records into csv files')
@@ -276,6 +279,7 @@ def make_parser():
         help='name of file to output csv references to')
     paper_parser.set_defaults(func=paper)
 
+    # Set up subcommand for parsing author records.
     author_parser = subparsers.add_parser(
         'author',
         description='parse author records into csv files')
