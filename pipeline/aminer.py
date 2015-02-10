@@ -21,6 +21,7 @@ import os
 import sys
 import csv
 
+import pandas as pd
 import luigi
 
 import util
@@ -93,16 +94,15 @@ class ParsePapersToCSV(luigi.Task):
         return AminerNetworkPapers()
 
     def output(self):
-        yield luigi.LocalTarget(os.path.join(config.base_csv_dir, 'paper.csv'))
-        yield luigi.LocalTarget(os.path.join(config.base_csv_dir, 'refs.csv'))
+        return [
+            luigi.LocalTarget(os.path.join(config.base_csv_dir, 'paper.csv')),
+            luigi.LocalTarget(os.path.join(config.base_csv_dir, 'refs.csv'))
+        ]
 
     def run(self):
         papers = self.iterpapers()
 
-        output_files = self.output()
-        papers_out_path = next(output_files)
-        refs_out_path = next(output_files)
-
+        papers_out_path, refs_out_path = self.output()
         with papers_out_path.open('w') as pf, refs_out_path.open('w') as rf:
             paper_writer = util.UnicodeWriter(pf)  # handle titles/abstracts
             refs_writer = csv.writer(rf)
@@ -175,56 +175,76 @@ class ParsePapersToCSV(luigi.Task):
                 record = self.nextrecord(f)
 
 
+class CSVPaperRecords(luigi.Task):
+    """Abstraction for depending only on paper records from original parse."""
+    def requires(self):
+        return ParsePapersToCSV()
+
+    def output(self):
+        papers_file = self.input()[0]
+        return luigi.LocalTarget(papers_file.path)
+
+
+class CSVRefsRecords(luigi.Task):
+    """Abstraction for depending only on refs records from original parse."""
+    def requires(self):
+        return ParsePapersToCSV()
+
+    def output(self):
+        refs_file = self.input()[1]
+        return luigi.LocalTarget(refs_file.path)
+
+
 class ParseUniqueVenues(luigi.Task):
     """Read through paper records and write out a list of unique venues."""
 
     def requires(self):
-        return ParsePapersToCSV()
-
-    def itervenues(self):
-        input_files = self.input()
-        papers_file = next(input_files)
-        with papers_file.open() as f:
-            reader = csv.reader(f)
-            headers = reader.next()
-            venue_index = headers.index('venue')
-            for record in reader:
-                yield record[venue_index]
+        return CSVPaperRecords()
 
     def output(self):
         return luigi.LocalTarget(os.path.join(config.base_csv_dir, 'venue.csv'))
 
     def run(self):
-        venues = self.itervenues()
-        unique_venues = set(venues)
+        # find venue column
+        with self.input().open() as papers_file:
+            reader = csv.reader(papers_file)
+            headers = reader.next()
+            venue_index = headers.index('venue')
+
+        # filter out unique venues
+        with self.input().open() as papers_file:
+            df = pd.read_csv(papers_file, header=0, usecols=(venue_index,))
+            unique_venues = df['venue'].unique()
+
+        # write to csv file
         with self.output().open('w') as outfile:
-            outfile.write('\n'.join(unique_venues))
+            outfile.write('\n'.join(map(str, unique_venues)))
 
 
 class ParseUniqueYears(luigi.Task):
     """Read through paper records and write out a list of unique venues."""
 
     def requires(self):
-        return ParsePapersToCSV()
-
-    def iteryears(self):
-        input_files = self.input()
-        papers_file = next(input_files)
-        with papers_file.open() as f:
-            reader = csv.reader(f)
-            headers = reader.next()
-            year_index = headers.index('year')
-            for record in reader:
-                yield record[year_index]
+        return CSVPaperRecords()
 
     def output(self):
         return luigi.LocalTarget(os.path.join(config.base_csv_dir, 'year.csv'))
 
     def run(self):
-        years = self.iteryears()
-        unique_years = set(years)
+        # find year column
+        with self.input().open() as papers_file:
+            reader = csv.reader(papers_file)
+            headers = reader.next()
+            year_index = headers.index('year')
+
+        # filter out unique years
+        with self.input().open() as papers_file:
+            df = pd.read_csv(papers_file, header=0, usecols=(year_index,))
+            unique_years = df['year'].unique()
+
+        # write to csv file
         with self.output().open('w') as outfile:
-            outfile.write('\n'.join(unique_years))
+            outfile.write('\n'.join(map(str, unique_years)))
 
 
 class ParseAuthorNamesToCSV(luigi.Task):
@@ -267,7 +287,8 @@ class ParseAuthorshipsToCSV(luigi.Task):
 
     def run(self):
         authorships = self.iter_authorships()
-        util.write_csv_to_fwrapper(self.output(), ('author_id', 'paper_id'), authorships)
+        util.write_csv_to_fwrapper(
+            self.output(), ('author_id', 'paper_id'), authorships)
 
     def iter_authorships(self):
         with self.input().open() as f:
