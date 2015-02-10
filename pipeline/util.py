@@ -104,3 +104,36 @@ def build_undirected_graph(nodes, edges):
     graph.simplify()
     return graph
 
+
+def flatten(struct):
+    """
+    Creates a flat list of all all items in structured output (dicts, lists, items):
+    .. code-block:: python
+        >>> flatten({'a': 'foo', 'b': 'bar'})
+        ['foo', 'bar']
+        >>> flatten(['foo', ['bar', 'troll']])
+        ['foo', 'bar', 'troll']
+        >>> flatten('foo')
+        ['foo']
+        >>> flatten(42)
+        [42]
+    """
+    if struct is None:
+        return []
+    flat = []
+    if isinstance(struct, dict):
+        for key, result in struct.iteritems():
+            flat += flatten(result)
+        return flat
+    if isinstance(struct, basestring):
+        return [struct]
+
+    try:
+        # if iterable
+        for result in struct:
+            flat += flatten(result)
+        return flat
+    except TypeError:
+        pass
+
+    return [struct]
