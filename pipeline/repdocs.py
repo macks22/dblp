@@ -184,7 +184,7 @@ class BuildLCCAuthorRepdocCorpusTf(YearFilterableTask):
 
     @property
     def base_paths(self):
-        return 'lcc-repdoc-by-author-corpus-tf.mm'
+        return 'lcc-repdoc-corpus-tf.mm'
 
     def read_lcc_author_repdocs(self):
         """Read and return an iterator over the author repdoc corpus, which excludes
@@ -216,7 +216,7 @@ class BuildLCCAuthorRepdocCorpusTfidf(YearFilterableTask):
 
     @property
     def base_paths(self):
-        return 'lcc-repdoc-by-author-corpus-tfidf.mm'
+        return 'lcc-repdoc-corpus-tfidf.mm'
 
     def run(self):
         bow_corpus_file = self.input()
