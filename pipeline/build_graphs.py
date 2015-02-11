@@ -1,229 +1,383 @@
 import csv
+
 import pandas as pd
 import igraph
+import luigi
+
 import util
+import aminer
+import filtering
+import config
 
 
-def read_paper_vertices(paper_file):
-    """Iterate through paper IDs from the paper csv file."""
-    for record in util.yield_csv_records(paper_file):
-        yield record[0]
+class YearFilterableTask(util.YearFilterableTask):
+    @property
+    def base_dir(self):
+        return config.graph_dir
 
 
-def read_paper_venues(paper_file):
-    """Iterate through (paper_id, venue) pairs from the paper csv file."""
-    for record in util.yield_csv_records(paper_file):
-        yield (record[0], record[2])
-
-
-def read_paper_references(refs_file, idmap):
-    """Filter out references to papers outside dataset."""
-    for paper_id, ref_id in util.yield_csv_records(refs_file):
-        try: yield (idmap[paper_id], idmap[ref_id])
-        except: pass
-
-
-def build_paper_citation_graph(paper_file, author_file, refs_file,
-                               idmap_fname='paper-id-to-node-id-map',
-                               save=True, out_fname='paper-citation-graph'):
+class BuildPaperCitationGraph(YearFilterableTask):
     """Build the citation graph for all papers. For each paper, a link is drawn
     between it and all of its references. The venue of its publication and its
-    list of authors are added as node attributes. If `save` is True, the graph
-    is saved in both pickle.gz and graphml.gz format. Both formats are used
-    because pickle allows inclusion of the `author_ids` attributes of the nodes,
-    which consists of a list of all authors of the paper. Graphml on the other
-    hand, is a simpler and more space-efficient format, which will only save the
-    venues as node attributes.
-
-    :param str paper_file: File name for csv paper records.
-    :param str author_file: File name for csv author records.
-    :param str refs_file: File name for csv citation file.
-    :param str idmap_fname: File name for paper id to node id mapping.
-    :param bool save: Whether to save the graph or not.
-    :param str out_fname: If saving, the graph is saved using this basename.
+    list of authors are added as node attributes. The graph is saved in both
+    pickle.gz and graphml.gz format. Both formats are used because pickle allows
+    inclusion of the `author_ids` attributes of the nodes, which consists of a
+    list of all authors of the paper. Graphml on the other hand, is a simpler
+    and more space-efficient format, which will only save the venues as node
+    attributes.
     """
-    # get paper ids from csv file and add to graph
-    refg = igraph.Graph()
-    nodes = read_paper_vertices(paper_file)
-    refg.add_vertices(nodes)
 
-    # Build and save paper id to node id mapping
-    idmap = util.build_and_save_idmap(refg, idmap_fname, 'paper')
+    def requires(self):
+        # TODO: consider using single dependency on FilterPapersToYearRange
+        return (filtering.FilteredCSVPapers(self.start, self.end),
+                filtering.FilteredCSVRefs(self.start, self.end),
+                filtering.FilterAuthorshipsToYearRange(self.start, self.end))
 
-    # now add venues to vertices as paper attributes
-    for paper_id, venue in read_paper_venues(paper_file):
-        node_id = idmap[paper_id]
-        refg.vs[node_id]['venue'] = venue
+    @property
+    def papers_file(self):
+        return self.input()[0]
 
-    # next add author ids
-    for v in refg.vs:
-        v['author_ids'] = []
+    @property
+    def refs_file(self):
+        return self.input()[1]
 
-    for author_id, paper_id in util.yield_csv_records(author_file):
-        node_id = idmap[paper_id]
-        refg.vs[node_id]['author_ids'].append(author_id)
+    @property
+    def author_file(self):
+        return self.input()[2]
 
-    # Finally add edges from citation records
-    citation_links = read_paper_references(refs_file, idmap)
-    refg.add_edges(citation_links)
+    @property
+    def base_paths(self):
+        return ('paper-citation-graph.pickle.gz',
+                'paper-citation-graph.graphml.gz',
+                'paper-id-to-node-id-map.csv')
 
-    # Save if requested
-    if save:
-        refg.write_picklez('%s.pickle.gz' % out_fname)
-        refg.write_graphmlz('%s.graphml.gz' % out_fname)
+    @property
+    def pickle_output_file(self):
+        return self.output()[0]
 
-    return refg
+    @property
+    def graphml_output_file(self):
+        return self.output()[1]
+
+    @property
+    def idmap_output_file(self):
+        return self.output()[2]
+
+    def read_paper_vertices(self):
+        """Iterate through paper IDs from the paper csv file."""
+        with self.papers_file.open() as papers_file:
+            papers_df = pd.read_csv(papers_file, header=0, usecols=(0,))
+            return papers_df['id'].values
+
+    def read_paper_venues(self):
+        """Iterate through (paper_id, venue) pairs from the paper csv file."""
+        for record in util.iter_csv_fwrapper(self.papers_file):
+            yield (record[0], record[2])
+
+    def read_paper_references(self, idmap):
+        """Filter out references to papers outside dataset."""
+        for paper_id, ref_id in util.iter_csv_fwrapper(self.refs_file):
+            try: yield (idmap[paper_id], idmap[ref_id])
+            except: pass
+
+    def run(self):
+        refg = igraph.Graph()
+        nodes = self.read_paper_vertices()
+        refg.add_vertices(nodes)
+
+        # Build and save paper id to node id mapping
+        idmap = {str(v['name']): v.index for v in refg.vs}
+        rows = sorted(idmap.items())
+        util.write_csv_to_fwrapper(
+            self.idmap_output_file, ('paper_id', 'node_id'), rows)
+
+        # Now add venues to nodes as paper attributes
+        for paper_id, venue in self.read_paper_venues():
+            node_id = idmap[paper_id]
+            refg.vs[node_id]['venue'] = venue
+
+        # next add author ids
+        for v in refg.vs:
+            v['author_ids'] = []
+
+        for author_id, paper_id in util.iter_csv_fwrapper(self.author_file):
+            node_id = idmap[paper_id]
+            refg.vs[node_id]['author_ids'].append(author_id)
+
+        # Finally add edges from citation records
+        citation_links = self.read_paper_references(idmap)
+        refg.add_edges(citation_links)
+
+        # Save in both pickle and graphml formats
+        refg.write_picklez(self.pickle_output_file.path)
+        refg.write_graphmlz(self.graphml_output_file.path)
+        return refg
 
 
-def get_paper_edges(refg, paper_id, author_id):
-    """Return a list of author-to-author edges for each paper."""
-    node = refg.vs[paper_id]
-    neighbors = node.neighbors()
-    author_lists = [n['author_ids'] for n in neighbors]
-    if not author_lists: return []
-    authors = reduce(lambda x,y: x+y, author_lists)
-    return zip([author_id]*len(authors), authors)
+class PickledPaperCitationGraph(YearFilterableTask):
+    def requires(self):
+        return BuildPaperCitationGraph(self.start, self.end)
+
+    def output(self):
+        pickle_file = self.input()[0]
+        return luigi.LocalTarget(pickle_file.path)
 
 
-def get_edges(author_file, idmap_fname, graph_picklez_file):
-    """Return all edges from a file in which each line contains an (author,
-    paper) pair."""
-    idmap = util.read_idmap(idmap_fname)
-    refg = igraph.Graph.Read_Picklez(graph_picklez_file)
-    records = util.yield_csv_records(author_file)
-    rows = ((refg, idmap[paper_id], author_id)
-            for author_id, paper_id in records)
+class PaperCitationGraphIdmap(YearFilterableTask):
+    def requires(self):
+        return BuildPaperCitationGraph(self.start, self.end)
 
-    while True:
-        edges = get_paper_edges(*rows.next())
-        for edge in edges:
-            yield edge
+    def output(self):
+        idmap_file = self.input()[2]
+        return luigi.LocalTarget(idmap_file.path)
 
 
-def build_author_citation_graph(author_file, idmap_fname, graph_picklez_file,
-                                outfile='author-citation-graph.graphml.gz')
+class BuildAuthorCitationGraph(YearFilterableTask):
     """Build the author citation graph from the paper citation graph and the
     authorship csv records.
-
-    :param str author_file: Filename containing authorship records. These should
-        consist of (author_id, paper_id) csv records, one per line.
-    :param str idmap_fname: Filename of paper id to node id csv mapping. This
-        should contain (paper_id, node_id) records.
-    :param str graph_picklez_file: Filename of paper citation graph in gzipped
-        pickle format. The pickled version is required in order to access the
-        `author_ids` attributes.
-    :param str outfile: Filename to write the author-citation-graph to.
     """
-    df = pd.read_csv(author_file, header=0, usecols=(0,))
-    author_ids = df['author_id'].values
-    edges = get_edges(author_file, idmap_fname, graph_picklez_file)
-    nodes = (str(author_id) for author_id in author_ids)
-    authorg = util.build_undirected_graph(nodes, edges)
 
-    # Now write the graph to gzipped graphml file.
-    if not outfile.endswith('.graphml.gz'):
-        while '.' in outfile:
-            outfile = os.path.splitext(outfile)[0]
-        outfile = '%s.graphml.gz'
-    authorg.write_graphmlz(outfile)
+    def requires(self):
+        return (filtering.FilterAuthorshipsToYearRange(self.start, self.end),
+                PaperCitationGraphIdmap(self.start, self.end),
+                PickledPaperCitationGraph(self.start, self.end))
 
-    # Finally, save the ID map.
-    save_id_map(authorg, 'author-id-to-node-id-map')
+    @property
+    def author_file(self):
+        return self.input()[0]
 
+    @property
+    def paper_idmap_file(self):
+        return self.input()[1]
 
-def write_lcc(graph, outfile, idmap_fname='lcc-author-id-to-node-id-map'):
-    components = graph.components()
-    lcc = components.giant()
-    lcc.write_graphmlz('%s.graphml.gz' % outfile)
-    lcc.write_edgelist('%s-edgelist.txt' % outfile)
-    save_id_map(lcc, idmap_fname)
+    @property
+    def paper_graph_file(self):
+        return self.input()[2]
 
+    @property
+    def base_paths(self):
+        return ('author-citation-graph.graphml.gz',
+                'author-id-to-node-id-map.csv')
 
-# -----------------------------------------------------------
-# build up ground-truth communities using venue info for LCC
-# -----------------------------------------------------------
+    def read_author_ids(self):
+        """Read author ids from author file and return as strings (for easy
+        reference when adding edges).
+        """
+        with self.author_file.open() as f:
+            df = pd.read_csv(f, header=0, usecols=(0,))
+            return df['author_id'].astype(str).values
 
-def load_linked_venue_frame(author_file, paper_file, lcc_idmap_fname):
-    """Join the author and paper data records in order to map authors to
-    venues."""
-    author_df = pd.read_table(
-            author_file, sep=",", header=0,
-            usecols=('author_id', 'paper_id'))
-    paper_df = pd.read_table(
-            paper_file, sep=",", header=0,
-            usecols=('id', 'venue'))
-    paper_df.columns = ('paper_id', 'venue')
+    def get_edges(self):
+        """Return all edges from a file in which each line contains an (author,
+        paper) pair."""
+        records = util.iter_csv_fwrapper(self.paper_idmap_file)
+        idmap = {record[0]: int(record[1]) for record in records}
+        refg = igraph.Graph.Read_Picklez(self.paper_graph_file.open())
+        records = util.iter_csv_fwrapper(self.author_file)
+        rows = ((refg, idmap[paper_id], author_id)
+                for author_id, paper_id in records)
 
-    # filter authors down to those in LCC
-    lcc_author_df = pd.read_csv(lcc_idmap_fname, header=0, usecols=(0,))
-    lcc_author_ids = df['author_id'].values
-    selection = author_df['author_id'].isin(lcc_author_ids)
-    author_df = author_df[selection]
-    merge_df = author_df.merge(paper_df)
-    del merge_df['paper_id']  # only need (author_id, venue) pairs
+        while True:
+            edges = self.get_paper_edges(*rows.next())
+            for edge in edges:
+                yield edge
 
+    def get_paper_edges(self, refg, paper_id, author_id):
+        """Return a list of author-to-author edges for each paper."""
+        node = refg.vs[paper_id]
+        neighbors = node.neighbors()
+        author_lists = [n['author_ids'] for n in neighbors]
+        if not author_lists: return []
+        authors = reduce(lambda x,y: x+y, author_lists)
+        return zip([author_id]*len(authors), authors)
 
-def assign_venue_ids(author_venue_df, outfile='lcc-venue-id-map.csv')
-    """Assign each venue an id and save the assignment."""
-    unique_venues = author_venue_df['venue'].unique()
-    unique_venues.sort()
-    venue_map = {venue: vnum for vnum, venue in enumerate(unique_venues)}
-    rows = ((vnum, venue) for venue, vnum in venue_map.iteritems())
-    util.write_csv(outfile, ('venue_id', 'venue_name'), rows)
-    return venue_map
+    def run(self):
+        nodes = self.read_author_ids()
+        edges = self.get_edges()
+        authorg = util.build_undirected_graph(nodes, edges)
 
+        # Now write the graph to gzipped graphml file.
+        graph_output_file, idmap_output_file = self.output()
+        authorg.write_graphmlz(graph_output_file.path)
 
-def add_venues_to_graph(graph, author_venue_df, venue_map, outfile):
-    # Use sets in order to ensure uniqueness.
-    for v in lcc.vs:
-        v['venues'] = set()
-
-    # Add the venue IDs to the node venue sets.
-    for rownum, (author_id, venue) in author_venue_df.iterrows():
-        node_id = lcc_idmap[str(author_id)]
-        venue_id = venue_map[venue]
-        graph.vs[node_id]['venues'].add(venue_id)
-
-    # Convert the sets to tuples.
-    for v in graph.vs:
-        v['venues'] = tuple(v['venues'])
-
-    # save a copy of the graph with venue info
-    if not outfile.endswith('.pickle.gz'):
-        while '.' in outfile:
-            outfile = os.path.splitext(outfile)[0]
-        outfile = '%s.pickle.gz' % outfile
-    graph.write_picklez(outfile)  # lcc-author-citation-graph
+        # Finally, build and save the ID map.
+        idmap = {v['name']: v.index for v in authorg.vs}
+        rows = sorted(idmap.items())
+        util.write_csv_to_fwrapper(
+            idmap_output_file, ('author_id', 'node_id'), rows)
 
 
-def build_ground_truth(graph, venue_map,
-                       outfile='lcc-ground-truth-by-venue.txt',
-                       save_by_author='lcc-author-venues.txt'):
+class WriteLCCAuthorCitationGraph(YearFilterableTask):
+    """Find the largest connected component in the author citation graph."""
+
+    def requires(self):
+        return BuildAuthorCitationGraph(self.start, self.end)
+
+    @property
+    def base_paths(self):
+        return ('lcc-author-citation-graph.graphml.gz',
+                'lcc-author-citation-graph.edgelist.txt',
+                'lcc-author-id-to-node-id-map.csv')
+
+    def run(self):
+        graphml_outfile, edgelist_outfile, idmap_outfile = self.output()
+        author_graph_file, _ = self.input()
+
+        # Read graph, find LCC, and save as graphml and edgelist
+        authorg = igraph.Graph.Read_GraphMLz(author_graph_file.path)
+        components = authorg.components()
+        lcc = components.giant()
+        lcc.write_graphmlz(graphml_outfile.path)
+        lcc.write_edgelist(edgelist_outfile.path)
+
+        # Build and save id map.
+        idmap = {v['name']: v.index for v in lcc.vs}
+        rows = sorted(idmap.items())
+        util.write_csv_to_fwrapper(
+            idmap_outfile, ('author_id', 'node_id'), rows)
+
+
+class AuthorCitationGraphLCCGraphml(YearFilterableTask):
+    def requires(self):
+        return WriteLCCAuthorCitationGraph(self.start, self.end)
+
+    def output(self):
+        return self.input()[0]
+
+
+class AuthorCitationGraphLCCIdmap(YearFilterableTask):
+    def requires(self):
+        return WriteLCCAuthorCitationGraph(self.start, self.end)
+
+    def output(self):
+        return self.input()[2]
+
+
+class AddVenuesToAuthorCitationGraph(YearFilterableTask):
+    """Build up ground truth communities using venue info for LCC."""
+
+    def requires(self):
+        return (AuthorCitationGraphLCCGraphml(self.start, self.end),
+                AuthorCitationGraphLCCIdmap(self.start, self.end),
+                filtering.FilteredCSVPapers(self.start, self.end),
+                filtering.FilterAuthorshipsToYearRange(self.start, self.end))
+
+    @property
+    def base_paths(self):
+        return ('lcc-author-citation-graph.pickle.gz',
+                'lcc-venue-id-map.csv')
+
+    def build_linked_venue_frame(self):
+        """Join the author and paper data records in order to map authors to
+        venues."""
+        _, idmap_file, paper_file, author_file = self.input()
+
+        # Read in authorship and venue records, with common paper_id for join
+        with author_file.open() as author_fd, paper_file.open() as paper_fd:
+            author_df = pd.read_table(
+                    author_fd, sep=",", header=0,
+                    usecols=('author_id', 'paper_id'))
+            paper_df = pd.read_table(
+                    paper_fd, sep=",", header=0,
+                    usecols=('id', 'venue'))
+            paper_df.columns = ('paper_id', 'venue')
+
+        # filter authors down to those in LCC
+        with idmap_file.open() as author_fd:
+            lcc_author_df = pd.read_csv(author_fd, header=0, usecols=(0,))
+            lcc_author_ids = lcc_author_df['author_id'].values
+
+        # Filter based on LCC author ids
+        selection = author_df['author_id'].isin(lcc_author_ids)
+        author_df = author_df[selection]
+        merge_df = author_df.merge(paper_df)
+        del merge_df['paper_id']  # only need (author_id, venue) pairs
+        return merge_df
+
+    def assign_venue_ids(self, author_venue_df):
+        """Assign each venue an id and save the assignment."""
+        _, venue_map_file = self.output()
+        unique_venues = author_venue_df['venue'].unique()
+        unique_venues.sort()
+        venue_map = {venue: vnum for vnum, venue in enumerate(unique_venues)}
+        return venue_map
+
+    def run(self):
+        graph_file, idmap_file, paper_file, author_file = self.input()
+
+        # Read in dependencies
+        lcc = igraph.Graph.Read_GraphMLz(graph_file.path)
+        author_venue_df = self.build_linked_venue_frame()
+        venue_map = self.assign_venue_ids(author_venue_df)
+
+        records = util.iter_csv_fwrapper(idmap_file)
+        lcc_idmap = {record[0]: int(record[1]) for record in records}
+
+        # Use sets in order to ensure uniqueness.
+        for v in lcc.vs:
+            v['venues'] = set()
+
+        # Add the venue IDs to the node venue sets.
+        for rownum, (author_id, venue) in author_venue_df.iterrows():
+            node_id = lcc_idmap[str(author_id)]
+            venue_id = venue_map[venue]
+            lcc.vs[node_id]['venues'].add(venue_id)
+
+        # Convert the sets to tuples.
+        for v in lcc.vs:
+            v['venues'] = tuple(v['venues'])
+
+        # save a copy of the graph with venue info
+        pickle_outfile, venue_map_outfile = self.output()
+        lcc.write_picklez(pickle_outfile.path)  # lcc-author-citation-graph
+
+        rows = ((vnum, venue) for venue, vnum in venue_map.iteritems())
+        util.write_csv_to_fwrapper(
+            venue_map_outfile, ('venue_id', 'venue_name'), rows)
+
+
+class BuildGroundTruthCommunities(YearFilterableTask):
     """Build ground truth communities from the graph using the venue id
     mapping.
-    
-    :param {igraph.Graph} graph: The author citation graph with venues.
-    :param dict venue_map: Mapping from venue names to venue ids.
-    :param str outfile: Filename to write ground truth communities to.
-    :param str save_by_author: If not empty or None, this filename is used to
-        write a listing of each venue each author has published at. The line
-        number corresponds to the author id, and the line contains a space
-        separated list of venue ids.
     """
-    communities = {venue_id: [] for venue_id in venue_map.itervalues()}
-    for v in graph.vs:
-        for venue_id in v['venues']:
-            communities[venue_id].append(v.index)
 
-    # save ground truth communities
-    comms = sorted(communities.items())
-    rows = (' '.join(map(str, comm)) for comm_num, comm in comms)
-    with open(outfile, 'w') as f:
-        f.write('\n'.join(rows))
+    def requires(self):
+        return AddVenuesToAuthorCitationGraph(self.start, self.end)
 
-    # save venue info for each author separately
-    if save_by_author:
-        records = sorted([(v.index, v['venues']) for v in graph.vs])
-        rows = (' '.join(map(str, venues)) for node_id, venues in records)
-        with open(save_by_author, 'w') as f:
+    @property
+    def base_paths(self):
+        return ('lcc-ground-truth-by-venue.txt',
+                'lcc-author-venues.txt')
+
+    def run(self):
+        lcc_pickle_file, venue_map_file = self.input()
+
+        # Read in the LCC graph
+        lcc = igraph.Graph.Read_Picklez(lcc_pickle_file.path)
+
+        # Build the community mapping:
+        # each venue id is mapped to one or more node ids (the community)
+        records = util.iter_csv_fwrapper(venue_map_file)
+        communities = {int(venue_id): [] for venue_id, _ in records}
+        for v in lcc.vs:
+            for venue_id in v['venues']:
+                communities[venue_id].append(v.index)
+
+        # retrieve output files
+        by_venue_file, by_author_file = self.output()
+
+        # save ground truth communities
+        comms = sorted(communities.items())
+        rows = (' '.join(map(str, comm)) for comm_num, comm in comms)
+        with by_venue_file.open('w') as f:
             f.write('\n'.join(rows))
+
+        # save venue info for each author separately
+        records = sorted([(v.index, v['venues']) for v in lcc.vs])
+        rows = (' '.join(map(str, venues)) for node_id, venues in records)
+        with by_author_file.open('w') as f:
+            f.write('\n'.join(rows))
+
+
+if __name__ == "__main__":
+    luigi.run()
