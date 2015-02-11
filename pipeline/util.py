@@ -3,6 +3,46 @@ import csv
 import codecs
 import cStringIO
 
+import igraph
+import luigi
+
+import config
+
+
+class YearFilterableTask(luigi.Task):
+    start = luigi.IntParameter(default=None)
+    end = luigi.IntParameter(default=None)
+
+    @property
+    def base_paths(self):
+        return 'year-filteable-data.csv'
+
+    @property
+    def base_dir(self):
+        return config.repdoc_dir
+
+    def build_path(self, base_path):
+        if self.start is None or self.end is None:
+            return base_path
+        else:
+            try:
+                ext_index = base_path.index('.')
+                base = base_path[:ext_index]
+                ext = base_path[ext_index:]
+            except ValueError:
+                base = base_path
+                ext = ''
+            return '%s-%d-%d%s' % (base, self.start, self.end, ext)
+
+    def output(self):
+        if isinstance(self.base_paths, basestring):
+            base_path = self.build_path(self.base_paths)
+            return luigi.LocalTarget(os.path.join(self.base_dir, base_path))
+        else:
+            base_paths = [self.build_path(path) for path in self.base_paths]
+            return [luigi.LocalTarget(os.path.join(self.base_dir, path))
+                    for path in base_paths]
+
 
 class UnicodeWriter(object):
     """A CSV writer which will write rows to CSV file "f",
@@ -86,13 +126,18 @@ def build_and_save_idmap(graph, outfile, idname='author'):
     first_col = '%s_id' % idname
     idmap = {v['name']: v.index for v in graph.vs}
     rows = sorted(idmap.items())
-    util.write_csv(outfile, (first_col, 'node_id'), rows)
+    write_csv(outfile, (first_col, 'node_id'), rows)
+    return idmap
+
+
+def build_idmap(graph):
+    idmap = {v['name']: v.index for v in graph.vs}
     return idmap
 
 
 def read_idmap(idmap_fname):
     records = util.yield_csv_records(idmap_fname)
-    idmap = {record[0]: int(record[1]) for record in mapreader}
+    idmap = {record[0]: int(record[1]) for record in records}
     return idmap
 
 

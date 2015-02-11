@@ -10,21 +10,28 @@ import luigi
 import doctovec
 import util
 import aminer
+import filtering
 import config
 
 
-class BuildPaperRepdocs(luigi.Task):
+class YearFilterableTask(util.YearFilterableTask):
+    @property
+    def base_dir(self):
+        return config.repdoc_dir
+
+
+class BuildPaperRepdocs(YearFilterableTask):
     """Build representative documents for each paper in the DBLP corpus."""
 
     def requires(self):
-        return aminer.ParsePapersToCSV()
+        return filtering.FilteredCSVPapers(self.start, self.end)
 
-    def output(self):
-        return luigi.LocalTarget(
-            os.path.join(config.data_dir, 'repdoc-by-paper.csv'))
+    @property
+    def base_paths(self):
+        return 'repdoc-by-paper.csv'
 
     def read_paper_repdocs(self):
-        paper_file = self.input()[0]
+        paper_file = self.input()
         for record in util.iter_csv_fwrapper(paper_file):
             repdoc = '%s %s' % (record[1], record[4])
             yield (record[0], repdoc.decode('utf-8'))
@@ -39,33 +46,33 @@ class BuildPaperRepdocs(luigi.Task):
         util.write_csv_to_fwrapper(self.output(), ('paper_id', 'doc'), rows)
 
 
-class BuildPaperRepdocVectors(luigi.Task):
+class BuildPaperRepdocVectors(YearFilterableTask):
     """Vectorize paper repdocs, preprocessing terms."""
 
     def requires(self):
-        return BuildPaperRepdocs()
+        return BuildPaperRepdocs(self.start, self.end)
 
-    def output(self):
-        return luigi.LocalTarget(
-            os.path.join(config.data_dir, 'repdoc-by-paper-vectors.csv'))
+    @property
+    def base_paths(self):
+        return 'repdoc-by-paper-vectors.csv'
 
     def run(self):
         repdocs = util.iter_csv_fwrapper(self.input())
         docs = ((docid, doc.decode('utf-8')) for docid, doc in repdocs)
         vecs = ((docid, doctovec.vectorize(doc)) for docid, doc in docs)
         rows = ((docid, '|'.join(doc).encode('utf-8')) for docid, doc in vecs)
-        util.write_csv_to_fwrapper(self.input(), ('paper_id', 'doc'), rows)
+        util.write_csv_to_fwrapper(self.output(), ('paper_id', 'doc'), rows)
 
 
-class BuildPaperRepdocDictionary(luigi.Task):
+class BuildPaperRepdocDictionary(YearFilterableTask):
     """Build a dictionary to index the paper repdoc corpus."""
 
     def requires(self):
-        return BuildPaperRepdocVectors()
+        return BuildPaperRepdocVectors(self.start, self.end)
 
-    def output(self):
-        return luigi.LocalTarget(
-            os.path.join(config.data_dir, 'repdoc-by-paper-corpus.dict'))
+    @property
+    def base_paths(self):
+        return 'repdoc-by-paper-corpus.dict'
 
     def read_repdocs(self):
         records = util.iter_csv_fwrapper(self.input())
@@ -82,42 +89,46 @@ class BuildPaperRepdocDictionary(luigi.Task):
         dictionary.save(self.output().path)
 
 
-class BuildPaperRepdocCorpus(luigi.Task):
+class BuildPaperRepdocCorpus(YearFilterableTask):
     """Build BoW representation and save it in MM format."""
 
     def requires(self):
-        return [BuildPaperRepdocDictionary(),
-                BuildpaperRepdocVectors()]
+        return (BuildPaperRepdocDictionary(self.start, self.end),
+                BuildPaperRepdocVectors(self.start, self.end))
 
-    def output(self):
-        return luigi.LocalTarget(
-                os.path.join(config.data_dir, 'repdoc-by-paper-corpus.mm'))
+    @property
+    def base_paths(self):
+        return 'repdoc-by-paper-corpus.mm'
 
     def run(self):
         dict_file, vecs_file = self.input()
-        dictionary = gensim.corpora.Dictionary(dict_file.path)
+        dictionary = gensim.corpora.Dictionary.load(dict_file.path)
         records = util.iter_csv_fwrapper(vecs_file)
-        docs = ((docid, doc.decode('utf-8').split('|'))
-                for docid, doc in records)
+        repdoc_corpus = (doc.decode('utf-8').split('|') for _, doc in records)
         bow_corpus = (dictionary.doc2bow(doc) for doc in repdoc_corpus)
         gensim.corpora.MmCorpus.serialize(self.output().path, bow_corpus)
 
 
-class WritePaperToRepdocIdMap(luigi.Task):
-    """Map paper ids to contiguous mm document indices."""
+class WritePaperToRepdocIdMap(YearFilterableTask):
+    """Map paper ids to contiguous indices. These can be used as document
+    indices in the MM files, as well as node ids in the paper citation graph.
+    """
 
     def requires(self):
-        return BuildPaperRepdocVectors()
+        return BuildPaperRepdocVectors(self.start, self.end)
 
-    def output(self):
-        return luigi.LocalTarget(
-            os.path.join(config.data_dir, 'paper-id-to-repdoc-id-map.csv'))
+    @property
+    def base_paths(self):
+        return 'paper-id-to-repdoc-id-map.csv'
 
     def run(self):
-        records = util.iter_csv_fwrapper(self.input())
-        rows = ((paper_id, docid)
-                for docid, (paper_id, _) in enumerate(records))
-        util.write_csv_to_fwrapper(self.output(), ('paper_id', 'doc_id'), rows)
+        with self.input().open() as paper_file:
+            paper_df = pd.read_csv(paper_file, header=0, usecols=(0,))
+            paper_df.sort()
+
+        with self.output().open('w') as outfile:
+            paper_df['repdoc_id'] = paper_df.index
+            paper_df.to_csv(outfile, index=False)
 
 
 # ---------------------------------------------------------

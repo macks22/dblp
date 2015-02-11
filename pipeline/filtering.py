@@ -103,6 +103,31 @@ class FilterPapersToYearRange(luigi.Task, YearFiltering):
             filtered.to_csv(outfile, index=False)
 
 
+class FilteredCSVPapers(luigi.Task, YearFiltering):
+    """Abstraction to access only filtered papers output file."""
+    def requires(self):
+        if self.start is None or self.end is None:
+            return aminer.ParsePapersToCSV()
+        else:
+            return FilterPapersToYearRange(self.start, self.end)
+
+    def output(self):
+        return self.input()[0]
+
+
+class FilteredCSVRefs(luigi.Task, YearFiltering):
+    """Abstraction to access only filtered refs output file."""
+    def requires(self):
+        if self.start is None or self.end is None:
+            return aminer.ParsePapersToCSV()
+        else:
+            return FilterPapersToYearRange(self.start, self.end)
+
+    def output(self):
+        return self.input()[1]
+
+
+
 class YearFilteringNonPaper(YearFiltering):
     """Filter data records which depend on paper ids for filtering."""
     @property
