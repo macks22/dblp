@@ -13,7 +13,7 @@ class PathBuilder(object):
         base, ext = os.path.splitext(fname)
         fname = '%s-%s' % (os.path.basename(base), suffix)
         fname = '%s.csv' if not ext else '%s%s' % (fname, ext)
-        return os.path.join(config.data_dir, fname)
+        return os.path.join(config.filtered_dir, fname)
 
 
 class RemovePapersNoVenueOrYear(luigi.Task, PathBuilder):
@@ -28,8 +28,8 @@ class RemovePapersNoVenueOrYear(luigi.Task, PathBuilder):
         return luigi.LocalTarget(fpath)
 
     def run(self):
-        with self.input().open() as pfd:
-            df = pd.read_csv(pfd)
+        with self.input().open() as paper_fd:
+            df = pd.read_csv(paper_fd)
 
         df = df[(~df['venue'].isnull()) & (~df['year'].isnull())]
         with self.output().open('w') as outfile:
@@ -62,7 +62,7 @@ class YearFiltering(object):
     end = luigi.IntParameter()
 
     def get_fpath(self, fname, ext='csv'):
-        fpath = os.path.join(config.data_dir, fname)
+        fpath = os.path.join(config.filtered_dir, fname)
         return '%s-%d-%d.%s' % (fpath, self.start, self.end, ext)
 
 
@@ -142,8 +142,25 @@ class YearFilteringNonPaper(YearFiltering):
         return df['id'].unique()
 
 
+class FilterVenuesToYearRange(luigi.Task, YearFilteringNonPaper):
+    """Filter venue records to a particular range of years."""
+    def requires(self):
+        return FilterPapersToYearRange(self.start, self.end)
+
+    def output(self):
+        return luigi.LocalTarget(self.get_fpath('venue'))
+
+    def run(self):
+        with self.papers_file.open() as pfile:
+            paper_df = pd.read_csv(pfile, header=0, usecols=(0,2))
+            unique_venues = paper_df['venue'].unique()
+
+        with self.output().open() as afile:
+            afile.write('\n'.join(unique_venues))
+
+
 class FilterAuthorshipsToYearRange(luigi.Task, YearFilteringNonPaper):
-    """Filter authorship records to particular range of years."""
+    """Filter authorship records to a particular range of years."""
     def requires(self):
         return (FilterPapersToYearRange(self.start, self.end),
                 aminer.ParseAuthorshipsToCSV())
@@ -206,6 +223,7 @@ class FilterAllCSVRecordsToYearRange(luigi.Task, YearFiltering):
         yield FilterPapersToYearRange(self.start, self.end)
         yield FilterAuthorshipsToYearRange(self.start, self.end)
         yield FilterAuthorNamesToYearRange(self.start, self.end)
+        yield FilterVenuesToYearRange(self.start, self.end)
 
 
 if __name__ == "__main__":
