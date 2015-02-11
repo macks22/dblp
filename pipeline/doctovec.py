@@ -65,8 +65,8 @@ except ImportError:
 PUNCT = set(string.punctuation)
 # add or remove stuff here
 PUNCTUATION = ''.join(PUNCT)
-TRANSLATION_TABLE = None
-# TRANSLATION_TABLE = string.maketrans(frm, to)
+# TRANSLATION_TABLE = None
+TRANSLATION_TABLE = {ord(c): None for c in PUNCTUATION}
 
 # nltk has a list of 123 english stopwords
 # STOPWORDS = set(nltk.corpus.stopwords.words('english'))
@@ -105,7 +105,12 @@ simple_punct_remove = lambda word: word.replace('-', '').replace("'", '')
 
 
 def remove_punctuation(word):
-    return word.translate(TRANSLATION_TABLE, PUNCTUATION)
+    """Remove all punctuation from the word (unicode). Note that the `translate`
+    method is used, and we assume unicode inputs. The str method has a different
+    `translate` method, so if you end up working with strings, you may want to
+    revisit this method.
+    """
+    return word.translate(TRANSLATION_TABLE)
 
 def is_stopword(word):
     return word in STOPWORDS
