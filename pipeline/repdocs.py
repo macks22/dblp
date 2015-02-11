@@ -11,6 +11,7 @@ import doctovec
 import util
 import aminer
 import filtering
+import build_graphs
 import config
 
 
@@ -135,51 +136,94 @@ class WritePaperToRepdocIdMap(YearFilterableTask):
 # convert author repdocs to tf/tfidf corpuses
 # ---------------------------------------------------------
 
-def read_lcc_author_repdocs(author_repdoc_fname, lcc_idmap_fname):
-    """Read and return an iterator over the author repdoc corpus, which excludes
-    the authors not in the LCC.
+class BuildAuthorRepdocVectors(YearFilterableTask):
 
-    :param str author_repdoc_fname: Filename of csv author repdoc records. The
-        repdocs should be a string of terms, where each term is separated by a
-        '|' character.
-    :param str lcc_idmap_fname: Filename of LCC author id to node id mapping.
+    def requires(self):
+        return (BuildPaperRepdocVectors(self.start, self.end),
+                filtering.FilterAuthorshipsToYearRange(self.start, self.end))
+
+    @property
+    def base_paths(self):
+        return 'repdoc-by-author-vectors.csv'
+
+    def run(self):
+        paper_repdocs_file, author_file = self.input()
+
+        with paper_repdocs_file.open() as pfile:
+            paper_df = pd.read_csv(pfile, index_col=(0,))
+            paper_df.fillna('', inplace=True)
+
+        # read out authorship records
+        with author_file.open() as afile:
+            author_df = pd.read_csv(afile, header=0, index_col=(0,))
+
+        # initialize repdoc dictionary from complete list of person ids
+        author_ids = author_df.index.unique()
+        repdocs = {i: [] for i in author_ids}
+
+        # build up repdocs for each author
+        for person_id, paper_id in author_df.itertuples():
+            doc = paper_df.loc[paper_id]['doc']
+            repdocs[person_id].append(doc)
+
+        # save repdocs
+        rows = ((person_id, '|'.join(docs))
+                for person_id, docs in repdocs.iteritems())
+        util.write_csv_to_fwrapper(self.output(), ('author_id', 'doc'), rows)
+
+
+class BuildLCCAuthorRepdocCorpusTf(YearFilterableTask):
+    """Build repdoc corpus for LCC authors; use paper dictionary to incorporate
+    filtering criteria at the individual paper repdoc level.
     """
-    lcc_author_df = pd.read_csv(lcc_idmap_fname, header=0, usecols=(0,))
-    lcc_author_ids = df['author_id'].values
-    csv.field_size_limit(sys.maxint)
-    records = util.yield_csv_records(author_repdoc_fname)
-    return (doc.split('|') for author_id, doc in records
-            if int(author_id) in lcc_author_ids)
+
+    def requires(self):
+        return (BuildAuthorRepdocVectors(self.start, self.end),
+                BuildPaperRepdocDictionary(self.start, self.end),
+                build_graphs.AuthorCitationGraphLCCIdmap(self.start, self.end))
+
+    @property
+    def base_paths(self):
+        return 'lcc-repdoc-by-author-corpus-tf.mm'
+
+    def read_lcc_author_repdocs(self):
+        """Read and return an iterator over the author repdoc corpus, which excludes
+        the authors not in the LCC.
+        """
+        author_repdoc_file, _, lcc_idmap_file = self.input()
+
+        with lcc_idmap_file.open() as lcc_idmap_f:
+            lcc_author_df = pd.read_csv(lcc_idmap_f, header=0, usecols=(0,))
+            lcc_author_ids = lcc_author_df['author_id'].values
+
+        csv.field_size_limit(sys.maxint)
+        records = util.iter_csv_fwrapper(author_repdoc_file)
+        return (doc.split('|') for author_id, doc in records
+                if int(author_id) in lcc_author_ids)
+
+    def run(self):
+        _, paper_dict_file, _ = self.input()
+        repdocs = self.read_lcc_author_repdocs()
+        dictionary = gensim.corpora.Dictionary.load(paper_dict_file.path)
+        bow_corpus = (dictionary.doc2bow(doc) for doc in repdocs)
+        gensim.corpora.MmCorpus.serialize(self.output().path, bow_corpus)
 
 
-def build_author_repdoc_dictionary(author_repdoc_fname, lcc_idmap_fname,
-                                   outfile='lcc-repdoc-corpus.dict'):
-    corpus = read_lcc_author_repdocs(author_repdoc_fname, lcc_idmap_fname)
-    dictionary = gensim.corpora.Dictionary(corpus)
+class BuildLCCAuthorRepdocCorpusTfidf(YearFilterableTask):
 
-    # save dictionary and term id mapping
-    dictionary.save(outfile)
-    rows = [(term_id, term.encode('utf-8'))
-            for term, term_id in dictionary.token2id.iteritems()]
-    rows = sorted(rows)  # put ids in order
-    idmap_fname = '%s-term-id-map' % os.path.splitext(outfile)[0]
-    util.write_csv(idmap_fname, ('term_id', 'term'), rows)
+    def requires(self):
+        return BuildLCCAuthorRepdocCorpusTf(self.start, self.end)
 
+    @property
+    def base_paths(self):
+        return 'lcc-repdoc-by-author-corpus-tfidf.mm'
 
-def build_author_tf_corpus(author_repdoc_fname, lcc_idmap_fname, dictionary,
-                           outfile='lcc-repdoc-corpus-tf.mm'):
-    # write term frequency corpus
-    corpus = read_lcc_author_repdocs(author_repdoc_fname, lcc_idmap_fname)
-    bow_corpus = (dictionary.doc2bow(doc) for doc in corpus)
-    gensim.corpora.MmCorpus.serialize(outfile, bow_corpus)
-
-
-def build_author_tfidf_corpus(bow_corpus_fname,
-                              outfile='lcc-repdoc-corpus-tfidf.mm'):
-    bow_corpus = gensim.corpora.MmCorpus(bow_corpus_fname)
-    tfidf = gensim.models.TfidfModel(bow_corpus)
-    tfidf_corpus = tfidf[bow_corpus]
-    gensim.corpora.MmCorpus.serialize(outfile, tfidf_corpus)
+    def run(self):
+        bow_corpus_file = self.input()
+        bow_corpus = gensim.corpora.MmCorpus(bow_corpus_file.path)
+        tfidf = gensim.models.TfidfModel(bow_corpus)
+        tfidf_corpus = tfidf[bow_corpus]
+        gensim.corpora.MmCorpus.serialize(self.output().path, tfidf_corpus)
 
 
 if __name__ == "__main__":
