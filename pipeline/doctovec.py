@@ -28,6 +28,7 @@ Here are some other things you may want to do:
 :var set STOPWORDS: The set of stopwords to be filtered from documents.
 
 """
+import sys
 import string
 import itertools as it
 import operator as op
