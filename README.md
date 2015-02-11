@@ -20,6 +20,21 @@ TODO: fill in stats about dataset here
 *   which are used
 *   number of papers, authors, percent with abstract, etc.
 
+# Pipeline Design
+
+The entire pipeline is built using the `luigi` package, which provides a data
+pipeline dependency resolution scheme based on output files. Hence, there are
+many output files during all phases of processing. Often these are useful;
+sometimes they are not. Overall, luigi turned out to be a very nice package to
+work with. It allows each processing step to be written out as a distinct class.
+Each of these inherits from `luigi.Task`. Before running, each task checks its
+dependent data files. If any are absent, the tasks responsible for building them
+are run first. After running, each task produces one or more output files, which
+can then be specified as dependencies for later tasks. Hence, the generation of
+the entire dataset is as simple as running a task which is dependent on all the
+others. This task is called `BuildDataset`, and is present in the `pipeline`
+module.
+
 # Outputs
 
 All outputs end up in the `data` directory inside the base directory, which is
@@ -28,7 +43,7 @@ specified in the `config` module by setting `base_dir`.
 ## Module 1: Relational Representation
 
 Module: `aminer`
-Location: `base-csv`
+Location: `base-csv/`
 Config: `base_csv_dir`
 
 The first transformation layer involves parsing the given input files into
@@ -51,7 +66,7 @@ modules; the four original files from the Aminer dataset are not used again.
 ## Module 2: Filtering
 
 Module: `filtering`
-Location: `filtered-csv`
+Location: `filtered-csv/`
 Config: `filtered_dir`
 
 Rather than examining the entire dataset at once, many experiments will likely
@@ -77,7 +92,7 @@ be used instead of those produced from the `aminer` output.
 ## Module 3: Network Building
 
 Module: `build_graphs`
-Location: `graphs`
+Location: `graphs/`
 Config: `graph_dir`
 
 This module constructs citation networks from the relational data files. In
