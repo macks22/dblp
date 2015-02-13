@@ -113,12 +113,30 @@ def yield_csv_records(csv_file):
     f.close()
 
 
+def smart_open(file_like, mode='r'):
+    try:
+        return open(file_like, mode)
+    except TypeError:
+        try:
+            return file_like.open(mode)
+        except (TypeError, AttributeError):
+            return file_like
+
+
 def swap_file_delim(infile, indelim, outfile, outdelim):
-    with open(infile) as rf:
-        in_lines = (l.strip().split(indelim) for l in rf)
-        out_lines = (outdelim.join(l) for l in in_lines)
-        with open(outfile, 'w') as wf:
-            wf.write('\n'.join(out_lines))
+    """Swap out every instance of `indelim` in the input file for `outdelim` and
+    write to `outfile`. `infile` can be either a filename or file descriptor,
+    but `outfile` must be a filename.
+    """
+    rf = smart_open(infile, 'r')
+    wf = smart_open(outfile, 'w')
+
+    in_lines = (l.strip().split(indelim) for l in rf)
+    out_lines = (outdelim.join(l) for l in in_lines)
+    wf.write('\n'.join(out_lines))
+
+    rf.close()
+    wf.close()
 
 
 def build_and_save_idmap(graph, outfile, idname='author'):
