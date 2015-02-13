@@ -11,6 +11,7 @@ import util
 import build_graphs
 import repdocs
 import config
+import graphml_writer
 
 
 class WriteCodaFiles(build_graphs.YearFilterableTask):
@@ -84,6 +85,26 @@ class WriteCesnaFiles(repdocs.YearFilterableTask):
         yield WriteCodaFiles(self.start, self.end)
         yield WriteTermIdMap(self.start, self.end)
         yield WriteLCCAuthorBinaryTerms(self.start, self.end)
+
+
+class WriteEdcarFiles(build_graphs.YearFilterableTask):
+    """Edcar requires a dense graphml file, with all node features stored in the
+    node tag."""
+
+    def requires(self):
+        return (
+            repdocs.BuildLCCAuthorRepdocCorpusTf(self.start, self.end),
+            build_graphs.AuthorCitationGraphLCCEdgelist(self.start, self.end)
+        )
+
+    @property
+    def base_paths(self):
+        return 'lcc-author-citation-graph-dense.graphml'
+
+    def run(self):
+        node_attr_file, edgelist_file = self.input()
+        graphml_writer.write_edcar_graph(
+            node_attr_file.path, edgelist_file.path, self.output().path)
 
 
 if __name__ == "__main__":

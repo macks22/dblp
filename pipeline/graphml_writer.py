@@ -6,8 +6,10 @@ massive, but storage is cheaper than memory.
 """
 
 import os
+import sys
 import logging
 import argparse
+
 import numpy as np
 
 
@@ -58,6 +60,9 @@ def iter_corpus_terms(corpus_file):
     num_nodes, num_terms, num_entries = lines.next()
     features = np.array([0 for num in range(num_terms)])
 
+    # first yield the totals for logging purposes
+    yield (num_nodes, num_terms)
+
     cur_features = features.copy()
     node_id, term_id, tf = lines.next()
     old_id = node_id - 1
@@ -82,6 +87,11 @@ def write_dense_graph(node_iter, edge_iter, fpath='edcar-graph.graphml'):
     with open(fpath, 'w') as f:
         f.write(header)
 
+        # log num nodes and terms
+        num_nodes, num_terms = node_iter.next()
+        logging.info(
+            "writing %d nodes, each with %d features." % (num_nodes, num_terms))
+
         # write all nodes for the given PIs
         for num, node_attrs in enumerate(node_iter):
             node = Node(*node_attrs)
@@ -93,9 +103,15 @@ def write_dense_graph(node_iter, edge_iter, fpath='edcar-graph.graphml'):
         logging.info("done writing nodes.")
         logging.info("writing edges...")
         for src, target in edge_iter:
-            f.write('%s\n', edge_tag.format(source=src, target=target))
+            f.write('%s\n' % edge_tag.format(source=src, target=target))
 
         f.write(footer)
+
+
+def write_edcar_graph(node_attr_file, edgelist_file, outfile='edcar-out.graphml'):
+    node_iter = iter_corpus_terms(node_attr_file)
+    edge_iter = iter_edges(edgelist_file)
+    write_dense_graph(node_iter, edge_iter, outfile)
 
 
 def make_parser():
@@ -108,7 +124,7 @@ def make_parser():
         '-e', '--edgelist-file', action='store',
         help='whitespace delimited edgelist')
     parser.add_argument(
-        '-o', '--outfile', action='store', default='out',
+        '-o', '--outfile', action='store', default='out.graphml',
         help='name of file to use for output; graphml suffix is added')
     parser.add_argument(
         '-v', '--verbose', action='store_true',
@@ -126,6 +142,9 @@ if __name__ == "__main__":
         level=level,
         format="%(asctime)s %(name)s [%(levelname)s]: %(message)s")
 
-    node_iter = iter_corpus_terms(args.node_attributes_file)
-    edge_iter = iter_edges(args.edgelist_file)
-    write_dense_graph(node_iter, edge_iter, args.outfile)
+    if not args.node_attributes_file or not args.edgelist_file:
+        parser.print_usage()
+        sys.exit(1)
+
+    write_edcar_graph(
+        args.node_attributes_file, args.edgelist_file, args.outfile)
