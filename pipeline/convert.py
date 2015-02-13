@@ -70,7 +70,7 @@ class WriteLCCAuthorBinaryTerms(repdocs.YearFilterableTask):
             docs = ('\n'.join(lines) for lines in docs_as_lines)
 
             for doc in docs:
-                wf.write('\n'.join(doc))
+                wf.write('%s\n' % doc)
 
 
 class WriteCesnaFiles(repdocs.YearFilterableTask):
