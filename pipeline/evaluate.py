@@ -32,8 +32,7 @@ import itertools
 
 import numpy as np
 import matplotlib.pyplot as plt
-from pandas import DataFrame
-
+import pandas as pd
 pd.options.display.mpl_style = 'default'  # ggplot style
 
 
@@ -490,7 +489,7 @@ def plot_roc_curve(csvfile):
     """`csvfile` should be the csvfile of the evaluation statistics from the
     SENC parameter sweep.
     """
-    df = DataFrame.from_csv(csvfile)
+    df = pd.DataFrame.from_csv(csvfile)
     fig, ax = plt.subplots()
     frame = df[['fpr', 'r']].sort('fpr')
     ax.plot(frame['fpr'], frame['r'], color='black', alpha=0.85,
@@ -597,7 +596,7 @@ if __name__ == "__main__":
         args.matchings = True
         logging.info('all graphs and stats files will be output')
     else:
-        get_stats = (args.detail or args.summary or args.table or args.roc
+        get_stats = (args.detail_barplot or args.summary_barplot or args.table or args.roc
                      or args.precision_recall)
         get_lengths = args.boxplot_sizes or args.histogram_sizes
 
@@ -627,13 +626,13 @@ if __name__ == "__main__":
                 found, ground, args.matchings, method_name)
 
     if get_stats:
-        df = DataFrame.from_dict(stats).transpose()
+        df = pd.DataFrame.from_dict(stats).transpose()
         all_labels = ('fg-r','fg-p','fg-f1','fg-j', 'fg-fpr',
                       'gf-r','gf-p','gf-f1','gf-j', 'gf-fpr',
                       'r','p','f1','j', 'fpr')
         df = df.reindex_axis(all_labels, 1).sort('f1', ascending=False)
 
-    if args.all or args.detail:
+    if args.all or args.detail_barplot:
         logging.info('writing detailed barplot for community evaluations')
         labels = ['fg-r','fg-p','fg-f1', 'gf-r','gf-p','gf-f1',
                   'r','p','f1', 'fg-j', 'gf-j', 'j']
@@ -641,7 +640,7 @@ if __name__ == "__main__":
             'detailed-metrics-barplot', df, labels, 'f1',
             'Detailed evaluation of community detection methods')
 
-    if args.all or args.summary:
+    if args.all or args.summary_barplot:
         logging.info('writing summary barplot for community evaluations')
         summary_labels = ['r','p','f1','j']
         write_barplot(
