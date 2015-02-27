@@ -34,6 +34,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pandas import DataFrame
 
+pd.options.display.mpl_style = 'default'  # ggplot style
+
 
 tableau20 = [
     (31,119,180),
@@ -88,7 +90,7 @@ def recall(ground, found):
     return len(ground.intersection(found))/float(len(ground))
 
 def f1_score(ground, found):
-    """Harmonic mean of precision and recall (2pr / (p+r))."""
+    """Harmonic mean of precision and recall: (2pr / (p+r))."""
     p = precision(ground, found)
     r = recall(ground, found)
     bot = float(p + r)
@@ -96,6 +98,9 @@ def f1_score(ground, found):
     return 2*p*r / bot
 
 def fpr_matrix(found_list, ground_list):
+    """Compute the false positive rate matrix for the found communities when
+    compared to the ground truth communities given.
+    """
     all_ground = np.array(list(itertools.chain.from_iterable(ground_list)))
     size_all_ground = float(len(np.unique(all_ground)))
     glens = np.array([float(len(g)) for g in ground_list])
@@ -110,6 +115,13 @@ def fpr_matrix(found_list, ground_list):
 
 
 def similarity_matrices(found_list, ground_list):
+    """Compute  the recall, precision, f1-score and jaccard similarity.
+
+    :param list found_list: List of found communities to evaluate.
+    :param list ground_list: List of ground truth communities to compare
+        against.
+    :return: tuple of (recall, precision, f1-score, and jaccard similarity)
+    """
     gsets = [set(g) for g in ground_list]
     glens = np.array([float(len(g)) for g in ground_list])
     flens = np.matrix([float(len(f)) for f in found_list])
@@ -142,6 +154,9 @@ def similarity_matrices(found_list, ground_list):
 
 
 def recall_matrix(found_list, ground_list):
+    """Compute pairwise recall for a list of found communities when compared to
+    the given ground truth communities.
+    """
     gsets = [set(g) for g in ground_list]
     glens = np.array([float(len(g)) for g in ground_list])
     tp_mat = np.zeros((len(found_list), len(ground_list)))
@@ -150,6 +165,9 @@ def recall_matrix(found_list, ground_list):
     return (tp_mat / glens)
 
 def precision_matrix(found_list, ground_list):
+    """Compute pairwise precision for a list of found communities when compared
+    to the given ground truth communities.
+    """
     gsets = [set(g) for g in ground_list]
     flens = np.matrix([float(len(f)) for f in found_list])
     tp_mat = np.zeros((len(found_list), len(ground_list)))
@@ -158,6 +176,9 @@ def precision_matrix(found_list, ground_list):
     return np.array(tp_mat / np.tile(flens.transpose(), tp_mat.shape[1]))
 
 def jaccard_matrix(found_list, ground_list):
+    """Compute pairwise jaccard similarity for a list of found communities when
+    compared to the given ground truth communities.
+    """
     gsets = [set(g) for g in ground_list]
     int_mat = np.zeros((len(found_list), len(ground_list)))
     union_mat = np.zeros((len(found_list), len(ground_list)))
@@ -524,10 +545,10 @@ def make_parser():
         '-g', '--ground-file', action='store', default=None,
         help='specify the file of ground communities to compare against')
     parser.add_argument(
-        '-s', '--summary', action='store_true',
+        '-s', '--summary-barplot', action='store_true',
         help='write a summary bar plot with final metrics for each method')
     parser.add_argument(
-        '-d', '--detail', action='store_true',
+        '-d', '--detail-barplot', action='store_true',
         help='write detailed bar plot with all metrics for each method')
     parser.add_argument(
         '-r', '--roc', action='store_true',
