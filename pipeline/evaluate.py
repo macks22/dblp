@@ -230,7 +230,9 @@ def read_communities(fpath):
     basename = os.path.basename(fpath)
     pieces = os.path.splitext(basename)
     name, ext = pieces[0], pieces[1].replace('.','')
-    if ext == 'csv':
+    if ext == 'txt':
+        return (name, extract_comms(lines, ' '))
+    elif ext == 'csv':
         return (name, extract_comms(lines, ','))
     elif ext == 'tsv':
         return (name, extract_comms(lines, '\t'))
