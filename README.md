@@ -1,7 +1,24 @@
 dblp
 ====
 
-Parse DBLP data into a structured format for experimentation.
+This library was implemented to convert the DBLP data into a structured format
+for experimentation. It was developed to test the SENC (Seeded Estimation of
+Network Communities) community detection method. If you use it for scientific
+experiments, please cite the following paper:
+
+    @incollection{
+        title={Finding Community Topics and Membership in Graphs},
+        author={Revelle, Matt and Domeniconi, Carlotta and Sweeney, Mack and Johri, Aditya},
+        year={2015},
+        isbn={978-3-319-23524-0},
+        booktitle={Machine Learning and Knowledge Discovery in Databases},
+        volume={9285},
+        series={Lecture Notes in Computer Science},
+        doi={10.1007/978-3-319-23525-7_38},
+        url={http://dx.doi.org/10.1007/978-3-319-23525-7_38},
+        publisher={Springer International Publishing},
+        pages={625-640}
+    }
 
 # Data Source
 
