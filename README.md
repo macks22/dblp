@@ -52,6 +52,21 @@ the entire dataset is as simple as running a task which is dependent on all the
 others. This task is called `BuildDataset`, and is present in the `pipeline`
 module.
 
+# How to Run the Complete Pipeline
+
+The rest of this documentation describes exactly what the full pipeline does
+and how that is accomplished through several processing stages/modules. To
+run all stages and produce all outputs, there are three steps.
+
+1. Download the data files from [here](http://arnetminer.org/billboard/AMinerNetwork).
+2. Copy pipeline/config-example.py to pipeline/config.py and modify the directories so
+   the base directory points to the top-level directory you want your data files written
+   to. Place the files you downloaded in step 1 in the location pointed to by `originals_dir`.
+3. Run the following command, optionally including a start and end year to specify
+   a data range to filter down to.
+   
+`python pipeline.py BuildDataset --start <int> --end <int> --local-scheduler`
+
 # Outputs
 
 All outputs end up in the `data` directory inside the base directory, which is
