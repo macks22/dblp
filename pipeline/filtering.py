@@ -155,7 +155,7 @@ class FilterVenuesToYearRange(luigi.Task, YearFilteringNonPaper):
             paper_df = pd.read_csv(pfile, header=0, usecols=(0,2))
             unique_venues = paper_df['venue'].unique()
 
-        with self.output().open() as afile:
+        with self.output().open('w') as afile:
             afile.write('\n'.join(unique_venues))
 
 
