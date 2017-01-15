@@ -62,6 +62,10 @@ run all stages and produce all outputs, there are three steps.
 2. Copy pipeline/config-example.py to pipeline/config.py and modify the directories so
    the base directory points to the top-level directory you want your data files written
    to. Place the files you downloaded in step 1 in the location pointed to by `originals_dir`.
+   Ensure you have the following 3 files in the location of your `config.originals_dir`:
+   * AMiner-Author2Paper.tsv
+   * AMiner-Author.txt
+   * AMiner-Paper.txt
 3. Run the following command, including a start and end year to specify a data range to
    filter down to.
    
