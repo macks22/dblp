@@ -16,4 +16,7 @@ if [[ ! -f rar/unrar ]]; then
     fi
 fi
 
-./rar/unrar e data/AMiner-Paper.rar
+./rar/unrar e -o+ $1
+fname=$(basename $1)
+base=${fname%.*}
+mv $base.txt $2
