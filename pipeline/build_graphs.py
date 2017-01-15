@@ -379,5 +379,14 @@ class BuildGroundTruthCommunities(YearFilterableTask):
             f.write('\n'.join(rows))
 
 
+class BuildAllGraphData(luigi.Task):
+    """Build all the graph data with one single task."""
+    start = luigi.IntParameter(default=None)
+    end = luigi.IntParameter(default=None)
+
+    def requires(self):
+        yield BuildGroundTruthCommunities(self.start, self.end)
+
+
 if __name__ == "__main__":
     luigi.run()
