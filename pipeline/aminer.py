@@ -75,8 +75,12 @@ class AminerNetworkAuthorNames(luigi.Task):
 class AminerNetworkAuthorships(luigi.Task):
     """External dependency on Aminer-network DBLP author id/name file."""
     def output(self):
-        return luigi.LocalTarget(
-                os.path.join(config.originals_dir, 'AMiner-Author2Paper.txt'))
+        fpath = os.path.join(config.originals_dir, 'AMiner-Author2Paper.txt')
+        if not os.path.exists(fpath):
+            fpath2 = os.path.join(config.originals_dir, 'AMiner-Author2Paper.tsv')
+            fpath = fpath2 if os.path.exists(fpath2) else fpath
+
+        return luigi.LocalTarget(fpath)
 
 
 class AminerNetworkData(luigi.Task):
