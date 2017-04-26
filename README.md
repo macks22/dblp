@@ -59,17 +59,29 @@ and how that is accomplished through several processing stages/modules. To
 run all stages and produce all outputs, there are three steps.
 
 1. Download the data files from [here](http://arnetminer.org/billboard/AMinerNetwork).
+   I have added make targets to download and extract this data, so you can simply run
+   `make dl && make extract`. This will download the data and extract it into the directory
+   `data/original-data`. Note that `make extract` will also install a tool to unrar the
+   rar archive; it will be placed in the working directory.
 2. Copy pipeline/config-example.py to pipeline/config.py and modify the directories so
    the base directory points to the top-level directory you want your data files written
    to. Place the files you downloaded in step 1 in the location pointed to by `originals_dir`.
    Ensure you have the following 3 files in the location of your `config.originals_dir`:
-   * AMiner-Author2Paper.tsv
+   * AMiner-Author2Paper.txt
    * AMiner-Author.txt
    * AMiner-Paper.txt
 3. Run the following command, including a start and end year to specify a data range to
-   filter down to.
+   filter down to. If you do not already have the needed dependencies, you will need to
+   install them to run this. See below for instructions.
    
 `python pipeline.py BuildDataset --start <int> --end <int> --local-scheduler`
+
+## Installing Dependencies
+
+Dependencies include numpy, pandas, luigi, python-igraph, and gensim.
+To install all dependencies using pip, run:
+
+`pip install -r requirements.txt`
 
 # Outputs
 
