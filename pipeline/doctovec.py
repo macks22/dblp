@@ -73,7 +73,7 @@ TRANSLATION_TABLE = {ord(c): None for c in PUNCTUATION}
 # STOPWORDS = set(nltk.corpus.stopwords.words('english'))
 # but I had to expand on it to include contractions
 # this list includes all nltk stopwords plus contractions plus a few extras
-STOPWORDS_FILE = 'stopwords.txt'
+STOPWORDS_FILE = os.path.join(__curdir, 'stopwords.txt')
 try:
     with open(STOPWORDS_FILE) as f:
         STOPWORDS = set(f.read().split())
