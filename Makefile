@@ -10,7 +10,7 @@ config:
 	sed 's?/data/username/aminer-network?'`pwd`'?' pipeline/config-example.py > pipeline/config.py
 	python verify_config.py
 
-$(DATA_DIR)/Aminer-Paper.rar:
+$(DATA_DIR)/AMiner-Paper.rar:
 	mkdir -p $(DATA_DIR)
 	wget http://arnetminer.org/lab-datasets/aminerdataset/AMiner-Paper.rar -P $(DATA_DIR)
 
@@ -28,10 +28,10 @@ $(DATA_DIR)/Aminer-Paper.txt:
 	bash unrar.sh $(DATA_DIR)/AMiner-Paper.rar $(DATA_DIR)
 
 $(DATA_DIR)/AMiner-Author.txt:
-	unzip -o $(DATA_DIR)AMiner-Author.zip -d $(DATA_DIR)
+	unzip -o $(DATA_DIR)/AMiner-Author.zip -d $(DATA_DIR)
 
 $(DATA_DIR)/AMiner-Author2Paper.txt:
-	unzip -o AMiner-Author2Paper.zip -d $(DATA_DIR)
+	unzip -o $(DATA_DIR)/AMiner-Author2Paper.zip -d $(DATA_DIR)
 
-extract: dl $(DATA_DIR)/Aminer-Paper.txt $(DATA_DIR)/AMiner-Author.txt $(DATA_DIR)/AMiner-Author2Paper.txt
+extract: dl $(DATA_DIR)/AMiner-Paper.txt $(DATA_DIR)/AMiner-Author.txt $(DATA_DIR)/AMiner-Author2Paper.txt
 	python verify_download.py
