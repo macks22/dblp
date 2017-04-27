@@ -24,7 +24,7 @@ $(DATA_DIR)/AMiner-Author2Paper.zip:
 
 dl: $(DATA_DIR)/AMiner-Paper.rar $(DATA_DIR)/AMiner-Author.zip $(DATA_DIR)/AMiner-Author2Paper.zip
 
-$(DATA_DIR)/Aminer-Paper.txt:
+$(DATA_DIR)/AMiner-Paper.txt:
 	bash unrar.sh $(DATA_DIR)/AMiner-Paper.rar $(DATA_DIR)
 
 $(DATA_DIR)/AMiner-Author.txt:
